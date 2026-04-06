@@ -131,6 +131,7 @@ static int8_t CDC_Receive_FS(uint8_t* pbuf, uint32_t *Len);
 static int8_t CDC_TransmitCplt_FS(uint8_t *pbuf, uint32_t *Len, uint8_t epnum);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
+void OpenPeriph_HandleUsbRxBytes(const uint8_t *buf, uint32_t len);
 bool CDC_Transmit_Blocking(uint8_t *data, uint16_t len, uint32_t timeout_ms)
 {
     USBD_CDC_HandleTypeDef *hcdc =
@@ -284,10 +285,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  for (uint32_t i = 0; i < *Len; ++i) {
-    (void)RingBuf_WriteByte(&g_usb_rx_ringbuf, Buf[i]);
-  }
-  g_usb_rx_flag = 1;
+  OpenPeriph_HandleUsbRxBytes(Buf, *Len);
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);

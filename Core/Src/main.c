@@ -51,6 +51,7 @@ SPI_HandleTypeDef hspi1;
 /* USER CODE BEGIN PV */
 RingBuffer_t g_usb_rx_ringbuf;
 volatile uint8_t g_usb_rx_flag = 0;
+static volatile uint8_t g_usb_rx_overflow = 0;
 static ProtocolParser_t g_parser;
 static uint8_t g_tx_buf[PKT_MAX_FRAME];
 /* USER CODE END PV */
@@ -61,6 +62,7 @@ static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 static void ProcessPacket(const Packet_t *pkt);
+void OpenPeriph_HandleUsbRxBytes(const uint8_t *buf, uint32_t len);
 void OpenPeriph_HandleUsbPacket(const Packet_t *pkt);
 static void HandleCommand(const Packet_t *pkt);
 static void SendResponse(PacketType_t type, const uint8_t *payload, uint16_t len);
@@ -130,10 +132,25 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    if (g_usb_rx_overflow) {
+        g_usb_rx_overflow = 0;
+        g_usb_rx_flag = 0;
+        RingBuf_Init(&g_usb_rx_ringbuf);
+        Protocol_Init(&g_parser);
+        {
+            const uint8_t overflow_code = 0x01;
+            SendResponse(PKT_TYPE_ERROR, &overflow_code, 1);
+        }
+        continue;
+    }
+
     if (g_usb_rx_flag) {
         g_usb_rx_flag = 0;
         uint8_t byte;
         while (RingBuf_ReadByte(&g_usb_rx_ringbuf, &byte)) {
+            if (g_usb_rx_overflow) {
+                break;
+            }
             if (Protocol_ParseByte(&g_parser, byte)) {
                 if (g_parser.pkt.valid) {
                     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -292,6 +309,23 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void OpenPeriph_HandleUsbRxBytes(const uint8_t *buf, uint32_t len)
+{
+    if (g_usb_rx_overflow) {
+        g_usb_rx_flag = 1;
+        return;
+    }
+
+    for (uint32_t i = 0; i < len; ++i) {
+        if (!RingBuf_WriteByte(&g_usb_rx_ringbuf, buf[i])) {
+            g_usb_rx_overflow = 1;
+            break;
+        }
+    }
+
+    g_usb_rx_flag = 1;
+}
 
 void OpenPeriph_HandleUsbPacket(const Packet_t *pkt)
 {
