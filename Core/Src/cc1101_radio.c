@@ -457,7 +457,6 @@ bool Cc1101Radio_Receive(uint8_t *payload, uint8_t *in_out_length)
     }
 
     *in_out_length = packet_length;
-    Cc1101_FlushRxFifo();
     (void)Cc1101Radio_EnterRx();
     return (status[1] & CC1101_STATUS_CRC_OK) != 0U;
 }

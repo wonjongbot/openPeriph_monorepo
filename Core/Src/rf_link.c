@@ -3,9 +3,9 @@
 #include "cc1101_radio.h"
 #include "openperiph_config.h"
 
-void RfLink_Init(void)
+bool RfLink_Init(void)
 {
-    (void)Cc1101Radio_Init();
+    return Cc1101Radio_Init();
 }
 
 bool RfLink_SendFrame(const RfFrame_t *frame)

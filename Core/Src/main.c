@@ -55,6 +55,7 @@ volatile uint8_t g_usb_rx_flag = 0;
 static volatile uint8_t g_usb_rx_overflow = 0;
 static ProtocolParser_t g_parser;
 static uint8_t g_tx_buf[PKT_MAX_FRAME];
+static bool g_rf_link_ready = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -107,7 +108,7 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   OpenPeriph_BoardInit();
-  RfLink_Init();
+  g_rf_link_ready = RfLink_Init();
   /* Blink PC14 three times to confirm firmware is running */
   //For Debug
   for (int i = 0; i < 3; i++) {
@@ -121,9 +122,12 @@ int main(void)
   HAL_Delay(100);
 
   /* Startup message */
-  {
+  if (g_rf_link_ready) {
       const char *hello = "\r\nopenPeriph USB Bridge v1.0 ready\r\n";
       SendResponse(PKT_TYPE_STATUS, (const uint8_t *)hello, strlen(hello));
+  } else {
+      const uint8_t rf_init_error = 0x10;
+      SendResponse(PKT_TYPE_ERROR, &rf_init_error, 1);
   }
   /* USER CODE END 2 */
 
