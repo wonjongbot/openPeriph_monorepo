@@ -22,7 +22,7 @@ typedef struct {
     uint8_t font_id;
     uint8_t flags;
     uint8_t text_len;
-    uint8_t text[APP_TEXT_MAX_LEN];
+    uint8_t text[APP_TEXT_MAX_LEN + 1U];
 } AppDrawTextCommand_t;
 
 size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,
