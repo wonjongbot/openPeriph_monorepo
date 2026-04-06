@@ -70,6 +70,7 @@ typedef enum {
     CMD_SET_RF_POWER    = 0x03,  /* Set CC1101 TX power (payload[1]) */
     CMD_GET_STATUS      = 0x04,  /* Request status report */
     CMD_SET_RF_ADDR     = 0x05,  /* Set CC1101 device address */
+    CMD_LOCAL_HELLO     = 0x06,  /* Render a local display hello-world test */
 } CommandID_t;
 
 /* ---------- Parsed packet structure ---------- */

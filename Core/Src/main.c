@@ -78,6 +78,7 @@ void OpenPeriph_SendUsbNack(uint8_t packet_id, uint8_t reason);
 void OpenPeriph_SendUsbPacket(PacketType_t type, const uint8_t *payload, uint16_t len);
 uint16_t OpenPeriph_GetUsbRxAvailable(void);
 void OpenPeriph_ResetSystem(void);
+bool OpenPeriph_RenderLocalHello(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -410,9 +411,23 @@ void OpenPeriph_ResetSystem(void)
     NVIC_SystemReset();
 }
 
+bool OpenPeriph_RenderLocalHello(void)
+{
+    return DisplayService_RenderText(0U,
+                                     0U,
+                                     DISPLAY_SERVICE_FONT_16,
+                                     "Hello World",
+                                     true,
+                                     true);
+}
+
 #if OPENPERIPH_ROLE != OPENPERIPH_ROLE_MASTER
 static void ProcessPacket(const Packet_t *pkt)
 {
+    if (pkt == NULL) {
+        return;
+    }
+
     switch (pkt->type) {
     case PKT_TYPE_IMAGE_DATA:
     case PKT_TYPE_EMAIL_DATA:
@@ -428,6 +443,21 @@ static void ProcessPacket(const Packet_t *pkt)
     case PKT_TYPE_FILE_END:
         {
             uint16_t len = Protocol_BuildACK(&g_parser, pkt->id, g_tx_buf);
+            CDC_Transmit_Blocking(g_tx_buf, len, 100);
+        }
+        break;
+
+    case PKT_TYPE_COMMAND:
+        if ((pkt->payload_len >= 1U) && ((CommandID_t)pkt->payload[0] == CMD_LOCAL_HELLO)) {
+            if (OpenPeriph_RenderLocalHello()) {
+                uint16_t len = Protocol_BuildACK(&g_parser, pkt->id, g_tx_buf);
+                CDC_Transmit_Blocking(g_tx_buf, len, 100);
+            } else {
+                uint16_t len = Protocol_BuildNACK(&g_parser, pkt->id, 0x05U, g_tx_buf);
+                CDC_Transmit_Blocking(g_tx_buf, len, 100);
+            }
+        } else {
+            uint16_t len = Protocol_BuildNACK(&g_parser, pkt->id, 0x04U, g_tx_buf);
             CDC_Transmit_Blocking(g_tx_buf, len, 100);
         }
         break;

@@ -37,6 +37,7 @@ PKT_TYPE_STATUS      = 0x82
 
 CMD_PING             = 0x00
 CMD_GET_STATUS       = 0x04
+CMD_LOCAL_HELLO      = 0x06
 
 APP_FONT_12 = 0x01
 APP_FONT_16 = 0x02
@@ -198,13 +199,18 @@ def send_get_status(ser):
         p = resp['payload']
         if len(p) >= 8:
             print(f"  Firmware: v{p[0]}.{p[1]}")
-            print(f"  CC1101 status: 0x{p[2]:02X}")
+            print(f"  CC1101 MARCSTATE: 0x{p[2]:02X}")
             print(f"  RX buffer used: {p[3] | (p[4] << 8)} bytes")
             print(f"  Error count: {p[5] | (p[6] << 8)}")
         else:
             print(f"  Status payload: {p.hex()}")
     else:
         print("No valid status response.")
+
+def send_local_hello(ser):
+    payload = bytes([CMD_LOCAL_HELLO])
+    frame = build_packet(PKT_TYPE_COMMAND, payload)
+    send_and_wait_ack(ser, frame, "LOCAL_HELLO")
 
 def encode_draw_text_payload(dst: int,
                              x: int,
@@ -271,6 +277,8 @@ def main():
                         help='Send a ping command')
     parser.add_argument('--status', action='store_true',
                         help='Request MCU status')
+    parser.add_argument('--local-hello', action='store_true',
+                        help='Render local Hello World on the connected board EPD')
 
     args = parser.parse_args()
 
@@ -300,6 +308,9 @@ def main():
 
         elif args.status:
             send_get_status(ser)
+
+        elif args.local_hello:
+            send_local_hello(ser)
 
         elif args.image:
             if not os.path.exists(args.image):

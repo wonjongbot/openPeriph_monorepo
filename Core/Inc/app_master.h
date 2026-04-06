@@ -2,6 +2,7 @@
 #define APP_MASTER_H
 
 #include "app_protocol.h"
+#include "cc1101_radio.h"
 #include "openperiph_config.h"
 #include "rf_link.h"
 #include "usb_protocol.h"
@@ -14,6 +15,7 @@ void OpenPeriph_SendUsbNack(uint8_t packet_id, uint8_t reason);
 void OpenPeriph_SendUsbPacket(PacketType_t type, const uint8_t *payload, uint16_t len);
 uint16_t OpenPeriph_GetUsbRxAvailable(void);
 void OpenPeriph_ResetSystem(void);
+bool OpenPeriph_RenderLocalHello(void);
 
 static inline void AppMaster_Init(void)
 {
@@ -67,13 +69,21 @@ static inline void AppMaster_HandleCommand(const Packet_t *pkt)
     case CMD_GET_STATUS:
         status_payload[0] = 1U;
         status_payload[1] = 0U;
-        status_payload[2] = 0U;
+        status_payload[2] = Cc1101Radio_GetMarcState();
         status_payload[3] = (uint8_t)(OpenPeriph_GetUsbRxAvailable() & 0xFFU);
         status_payload[4] = (uint8_t)(OpenPeriph_GetUsbRxAvailable() >> 8);
         status_payload[5] = 0U;
         status_payload[6] = 0U;
         status_payload[7] = 0U;
         OpenPeriph_SendUsbPacket(PKT_TYPE_STATUS, status_payload, sizeof(status_payload));
+        break;
+
+    case CMD_LOCAL_HELLO:
+        if (OpenPeriph_RenderLocalHello()) {
+            OpenPeriph_SendUsbAck(pkt->id);
+        } else {
+            OpenPeriph_SendUsbNack(pkt->id, 0x05U);
+        }
         break;
 
     case CMD_SET_RF_CHANNEL:
