@@ -61,6 +61,7 @@ static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 static void ProcessPacket(const Packet_t *pkt);
+void OpenPeriph_HandleUsbPacket(const Packet_t *pkt);
 static void HandleCommand(const Packet_t *pkt);
 static void SendResponse(PacketType_t type, const uint8_t *payload, uint16_t len);
 /* USER CODE END PFP */
@@ -136,7 +137,7 @@ int main(void)
             if (Protocol_ParseByte(&g_parser, byte)) {
                 if (g_parser.pkt.valid) {
                     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-                    ProcessPacket(&g_parser.pkt);
+                    OpenPeriph_HandleUsbPacket(&g_parser.pkt);
                 } else {
                     uint16_t len = Protocol_BuildNACK(&g_parser,
                         g_parser.pkt.id, 0x01, g_tx_buf);
@@ -291,6 +292,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void OpenPeriph_HandleUsbPacket(const Packet_t *pkt)
+{
+    ProcessPacket(pkt);
+}
 
 static void SendResponse(PacketType_t type, const uint8_t *payload, uint16_t len)
 {
