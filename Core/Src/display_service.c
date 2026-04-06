@@ -178,6 +178,7 @@ bool DisplayService_Init(void)
 
 #if OPENPERIPH_EPD_PANEL == OPENPERIPH_EPD_PANEL_2IN13_V4
     EPD_2in13_V4_Init();
+    EPD_2in13_V4_Clear();
 #elif OPENPERIPH_EPD_PANEL == OPENPERIPH_EPD_PANEL_5IN83_V2
     EPD_5in83_V2_Init();
 #elif OPENPERIPH_EPD_PANEL == OPENPERIPH_EPD_PANEL_5IN83B_V2
@@ -190,7 +191,7 @@ bool DisplayService_Init(void)
     Paint_NewImage(DisplayService_MonoBuffer(),
                    kPanelInfo.width_px,
                    kPanelInfo.height_px,
-                   ROTATE_0,
+                   ROTATE_90,
                    WHITE);
     Paint_SelectImage(DisplayService_MonoBuffer());
     Paint_Clear(WHITE);
