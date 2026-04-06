@@ -1,0 +1,6 @@
+[submodule "ref/openPeriph_rf"]
+	path = ref/openPeriph_rf
+	url = git@github.com:wonjongbot/openPeriph_rf.git
+[submodule "ref/openPeriph_epd"]
+	path = ref/openPeriph_epd
+	url = git@github.com:wonjongbot/openPeriph_epd.git
