@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "openperiph_config.h"
+#include "app_slave.h"
 #include "display_service.h"
 #include "openperiph_board.h"
 #include "rf_link.h"
@@ -111,6 +112,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   OpenPeriph_BoardInit();
   g_rf_link_ready = RfLink_Init();
+#if OPENPERIPH_ROLE == OPENPERIPH_ROLE_SLAVE
+  AppSlave_Init();
+#endif
   /* Blink PC14 three times to confirm firmware is running */
   //For Debug
   for (int i = 0; i < 3; i++) {
@@ -185,6 +189,10 @@ int main(void)
             }
         }
     }
+
+#if OPENPERIPH_ROLE == OPENPERIPH_ROLE_SLAVE
+    AppSlave_Poll();
+#endif
   }
   /* USER CODE END 3 */
 }
