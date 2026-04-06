@@ -1,0 +1,19 @@
+# STM32CubeIDE workspace metadata
+.metadata/
+
+# CubeIDE build output
+Debug/
+Release/
+
+# Common generated artifacts
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
+*.list
+
+# Local launch and OS-specific project files
+*.launch
+.osx.project
