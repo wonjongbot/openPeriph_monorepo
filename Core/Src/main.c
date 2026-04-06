@@ -22,6 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "openperiph_config.h"
+#include "openperiph_board.h"
 #include "usbd_cdc_if.h"
 #include "ring_buffer.h"
 #include "usb_protocol.h"
@@ -99,6 +101,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   MX_SPI1_Init();
+  OpenPeriph_BoardInit();
   /* USER CODE BEGIN 2 */
   /* Blink PC14 three times to confirm firmware is running */
   //For Debug
