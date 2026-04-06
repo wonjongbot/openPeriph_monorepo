@@ -9,6 +9,8 @@ void OpenPeriph_BoardInit(void);
 
 GPIO_TypeDef *OpenPeriph_RfCsPort(void);
 uint16_t OpenPeriph_RfCsPin(void);
+GPIO_TypeDef *OpenPeriph_RfMisoPort(void);
+uint16_t OpenPeriph_RfMisoPin(void);
 GPIO_TypeDef *OpenPeriph_RfGdo0Port(void);
 uint16_t OpenPeriph_RfGdo0Pin(void);
 GPIO_TypeDef *OpenPeriph_RfGdo2Port(void);

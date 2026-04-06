@@ -6,6 +6,8 @@ void OpenPeriph_BoardInit(void)
 
 GPIO_TypeDef *OpenPeriph_RfCsPort(void) { return GPIOC; }
 uint16_t OpenPeriph_RfCsPin(void) { return GPIO_PIN_2; }
+GPIO_TypeDef *OpenPeriph_RfMisoPort(void) { return GPIOA; }
+uint16_t OpenPeriph_RfMisoPin(void) { return GPIO_PIN_6; }
 GPIO_TypeDef *OpenPeriph_RfGdo0Port(void) { return GPIOC; }
 uint16_t OpenPeriph_RfGdo0Pin(void) { return GPIO_PIN_0; }
 GPIO_TypeDef *OpenPeriph_RfGdo2Port(void) { return GPIOC; }

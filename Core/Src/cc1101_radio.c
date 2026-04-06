@@ -96,7 +96,7 @@ static bool Cc1101_WaitForSpiReady(void)
 {
     const uint32_t start_tick = HAL_GetTick();
 
-    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6) != GPIO_PIN_RESET) {
+    while (HAL_GPIO_ReadPin(OpenPeriph_RfMisoPort(), OpenPeriph_RfMisoPin()) != GPIO_PIN_RESET) {
         if ((HAL_GetTick() - start_tick) >= CC1101_MISO_TIMEOUT_MS) {
             return false;
         }
@@ -343,7 +343,12 @@ bool Cc1101Radio_Init(void)
     Cc1101_FlushRxFifo();
     Cc1101_FlushTxFifo();
     s_radio_initialized = true;
-    return Cc1101Radio_EnterRx();
+    if (!Cc1101Radio_EnterRx()) {
+        s_radio_initialized = false;
+        return false;
+    }
+
+    return true;
 }
 
 bool Cc1101Radio_Reset(void)
