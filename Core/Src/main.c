@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "openperiph_config.h"
+#include "app_master.h"
 #include "app_slave.h"
 #include "display_service.h"
 #include "openperiph_board.h"
@@ -66,11 +67,17 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
+#if OPENPERIPH_ROLE != OPENPERIPH_ROLE_MASTER
 static void ProcessPacket(const Packet_t *pkt);
+#endif
 void OpenPeriph_HandleUsbRxBytes(const uint8_t *buf, uint32_t len);
 void OpenPeriph_HandleUsbPacket(const Packet_t *pkt);
-static void HandleCommand(const Packet_t *pkt);
 static void SendResponse(PacketType_t type, const uint8_t *payload, uint16_t len);
+void OpenPeriph_SendUsbAck(uint8_t packet_id);
+void OpenPeriph_SendUsbNack(uint8_t packet_id, uint8_t reason);
+void OpenPeriph_SendUsbPacket(PacketType_t type, const uint8_t *payload, uint16_t len);
+uint16_t OpenPeriph_GetUsbRxAvailable(void);
+void OpenPeriph_ResetSystem(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -112,6 +119,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   OpenPeriph_BoardInit();
   g_rf_link_ready = RfLink_Init();
+#if OPENPERIPH_ROLE == OPENPERIPH_ROLE_MASTER
+  AppMaster_Init();
+#endif
 #if OPENPERIPH_ROLE == OPENPERIPH_ROLE_SLAVE
   AppSlave_Init();
 #endif
@@ -359,7 +369,11 @@ void OpenPeriph_HandleUsbRxBytes(const uint8_t *buf, uint32_t len)
 
 void OpenPeriph_HandleUsbPacket(const Packet_t *pkt)
 {
+#if OPENPERIPH_ROLE == OPENPERIPH_ROLE_MASTER
+    AppMaster_HandleUsbPacket(pkt);
+#else
     ProcessPacket(pkt);
+#endif
 }
 
 static void SendResponse(PacketType_t type, const uint8_t *payload, uint16_t len)
@@ -368,6 +382,35 @@ static void SendResponse(PacketType_t type, const uint8_t *payload, uint16_t len
     CDC_Transmit_Blocking(g_tx_buf, frame_len, 200);
 }
 
+void OpenPeriph_SendUsbAck(uint8_t packet_id)
+{
+    uint16_t len = Protocol_BuildACK(&g_parser, packet_id, g_tx_buf);
+    CDC_Transmit_Blocking(g_tx_buf, len, 100);
+}
+
+void OpenPeriph_SendUsbNack(uint8_t packet_id, uint8_t reason)
+{
+    uint16_t len = Protocol_BuildNACK(&g_parser, packet_id, reason, g_tx_buf);
+    CDC_Transmit_Blocking(g_tx_buf, len, 100);
+}
+
+void OpenPeriph_SendUsbPacket(PacketType_t type, const uint8_t *payload, uint16_t len)
+{
+    SendResponse(type, payload, len);
+}
+
+uint16_t OpenPeriph_GetUsbRxAvailable(void)
+{
+    return (uint16_t)RingBuf_Available(&g_usb_rx_ringbuf);
+}
+
+void OpenPeriph_ResetSystem(void)
+{
+    HAL_Delay(10);
+    NVIC_SystemReset();
+}
+
+#if OPENPERIPH_ROLE != OPENPERIPH_ROLE_MASTER
 static void ProcessPacket(const Packet_t *pkt)
 {
     switch (pkt->type) {
@@ -389,10 +432,6 @@ static void ProcessPacket(const Packet_t *pkt)
         }
         break;
 
-    case PKT_TYPE_COMMAND:
-        HandleCommand(pkt);
-        break;
-
     default:
         {
             uint16_t len = Protocol_BuildNACK(&g_parser, pkt->id, 0x02, g_tx_buf);
@@ -401,57 +440,7 @@ static void ProcessPacket(const Packet_t *pkt)
         break;
     }
 }
-
-static void HandleCommand(const Packet_t *pkt)
-{
-    if (pkt->payload_len < 1) return;
-    CommandID_t cmd = (CommandID_t)pkt->payload[0];
-    uint16_t resp_len;
-
-    switch (cmd) {
-    case CMD_PING:
-        resp_len = Protocol_BuildACK(&g_parser, pkt->id, g_tx_buf);
-        CDC_Transmit_Blocking(g_tx_buf, resp_len, 100);
-        break;
-
-    case CMD_RESET:
-        resp_len = Protocol_BuildACK(&g_parser, pkt->id, g_tx_buf);
-        CDC_Transmit_Blocking(g_tx_buf, resp_len, 200);
-        HAL_Delay(10);
-        NVIC_SystemReset();
-        break;
-
-    case CMD_GET_STATUS:
-        {
-            uint8_t sp[8];
-            sp[0] = 1; sp[1] = 0;  /* firmware v1.0 */
-            sp[2] = 0;             /* CC1101 status placeholder */
-            sp[3] = (uint8_t)(RingBuf_Available(&g_usb_rx_ringbuf) & 0xFF);
-            sp[4] = (uint8_t)(RingBuf_Available(&g_usb_rx_ringbuf) >> 8);
-            sp[5] = 0; sp[6] = 0; sp[7] = 0;
-            resp_len = Protocol_BuildPacket(&g_parser, PKT_TYPE_STATUS, sp, 8, g_tx_buf);
-            CDC_Transmit_Blocking(g_tx_buf, resp_len, 100);
-        }
-        break;
-
-    case CMD_SET_RF_CHANNEL:
-    case CMD_SET_RF_POWER:
-    case CMD_SET_RF_ADDR:
-        if (pkt->payload_len >= 2) {
-            /* TODO: CC1101 driver call with pkt->payload[1] */
-            resp_len = Protocol_BuildACK(&g_parser, pkt->id, g_tx_buf);
-        } else {
-            resp_len = Protocol_BuildNACK(&g_parser, pkt->id, 0x03, g_tx_buf);
-        }
-        CDC_Transmit_Blocking(g_tx_buf, resp_len, 100);
-        break;
-
-    default:
-        resp_len = Protocol_BuildNACK(&g_parser, pkt->id, 0x04, g_tx_buf);
-        CDC_Transmit_Blocking(g_tx_buf, resp_len, 100);
-        break;
-    }
-}
+#endif
 
 /* USER CODE END 4 */
 
