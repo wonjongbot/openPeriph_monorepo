@@ -3,6 +3,7 @@
 #include <string.h>
 
 #define APP_DRAW_TEXT_FIXED_SIZE 8U
+#define APP_DRAW_TEXT_MAX_TRANSMITTED_LEN 39U
 
 size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,
                                   uint8_t *out_buf,
@@ -11,7 +12,7 @@ size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,
     if (cmd == NULL || out_buf == NULL) {
         return 0U;
     }
-    if (cmd->text_len > APP_TEXT_MAX_LEN) {
+    if (cmd->text_len > APP_DRAW_TEXT_MAX_TRANSMITTED_LEN) {
         return 0U;
     }
 
@@ -48,7 +49,7 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf,
 
     const uint8_t text_len = buf[7];
     const size_t total_len = APP_DRAW_TEXT_FIXED_SIZE + (size_t)text_len;
-    if (text_len > APP_TEXT_MAX_LEN) {
+    if (text_len > APP_DRAW_TEXT_MAX_TRANSMITTED_LEN) {
         return false;
     }
     if (len != total_len) {
@@ -65,6 +66,7 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf,
     if (text_len > 0U) {
         memcpy(out_cmd->text, &buf[APP_DRAW_TEXT_FIXED_SIZE], text_len);
     }
+    out_cmd->text[text_len] = '\0';
 
     return true;
 }

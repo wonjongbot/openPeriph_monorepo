@@ -28,6 +28,7 @@ int main(void)
     assert(decoded.flags == (APP_DRAW_FLAG_CLEAR_FIRST | APP_DRAW_FLAG_FULL_REFRESH));
     assert(decoded.text_len == 5U);
     assert(memcmp(decoded.text, "Hello", 5U) == 0);
+    assert(decoded.text[5] == '\0');
 
     return 0;
 }
