@@ -133,10 +133,13 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     if (g_usb_rx_overflow) {
-        g_usb_rx_overflow = 0;
-        g_usb_rx_flag = 0;
+        __disable_irq();
+        /* Reset shared parser state before releasing the overflow latch. */
         RingBuf_Init(&g_usb_rx_ringbuf);
         Protocol_Init(&g_parser);
+        g_usb_rx_overflow = 0;
+        g_usb_rx_flag = 0;
+        __enable_irq();
         {
             const uint8_t overflow_code = 0x01;
             SendResponse(PKT_TYPE_ERROR, &overflow_code, 1);
