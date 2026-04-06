@@ -21,7 +21,6 @@ import struct
 import sys
 import os
 import time
-import serial
 
 # ── Packet types ──────────────────────────────────────────────────
 PKT_TYPE_IMAGE_DATA  = 0x01
@@ -30,6 +29,7 @@ PKT_TYPE_TEXT_DATA   = 0x03
 PKT_TYPE_FILE_START  = 0x04
 PKT_TYPE_FILE_END    = 0x05
 PKT_TYPE_COMMAND     = 0x10
+PKT_TYPE_DRAW_TEXT   = 0x11
 
 PKT_TYPE_ACK         = 0x80
 PKT_TYPE_NACK        = 0x81
@@ -37,6 +37,14 @@ PKT_TYPE_STATUS      = 0x82
 
 CMD_PING             = 0x00
 CMD_GET_STATUS       = 0x04
+
+APP_FONT_12 = 0x01
+APP_FONT_16 = 0x02
+
+APP_DRAW_FLAG_CLEAR_FIRST = 0x01
+APP_DRAW_FLAG_FULL_REFRESH = 0x02
+
+APP_TEXT_MAX_LEN = 40
 
 PKT_MAX_PAYLOAD      = 1024
 
@@ -76,7 +84,7 @@ def build_packet(pkt_type: int, payload: bytes) -> bytes:
     return frame
 
 # ── Packet parser (for responses) ────────────────────────────────
-def read_response(ser: serial.Serial, timeout: float = 2.0) -> dict:
+def read_response(ser, timeout: float = 2.0) -> dict:
     """Read one response packet from the MCU."""
     ser.timeout = timeout
     result = {'valid': False, 'type': 0, 'id': 0, 'payload': b''}
@@ -198,6 +206,42 @@ def send_get_status(ser):
     else:
         print("No valid status response.")
 
+def encode_draw_text_payload(dst: int,
+                             x: int,
+                             y: int,
+                             font: str,
+                             clear_first: bool,
+                             full_refresh: bool,
+                             text: str) -> bytes:
+    if not 0 <= dst <= 0xFF:
+        raise ValueError("destination address must fit in 0..255")
+    if not 0 <= x <= 0xFFFF:
+        raise ValueError("x must fit in 0..65535")
+    if not 0 <= y <= 0xFFFF:
+        raise ValueError("y must fit in 0..65535")
+
+    try:
+        text_bytes = text.encode('ascii')
+    except UnicodeEncodeError as exc:
+        raise ValueError("draw text currently supports ASCII only") from exc
+
+    if len(text_bytes) > APP_TEXT_MAX_LEN:
+        raise ValueError(f"draw text payload exceeds {APP_TEXT_MAX_LEN} ASCII bytes")
+
+    font_id = APP_FONT_12 if font == '12' else APP_FONT_16
+    flags = 0
+    if clear_first:
+        flags |= APP_DRAW_FLAG_CLEAR_FIRST
+    if full_refresh:
+        flags |= APP_DRAW_FLAG_FULL_REFRESH
+
+    return (
+        bytes([dst])
+        + struct.pack('<HHBB', x, y, font_id, flags)
+        + bytes([len(text_bytes)])
+        + text_bytes
+    )
+
 # ── CLI ──────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
@@ -210,12 +254,31 @@ def main():
     parser.add_argument('--email',
                         help='Email data as "subject|body|recipient"')
     parser.add_argument('--text', help='Plain text message to send')
+    parser.add_argument('--draw-text', help='Text to draw on slave EPD')
+    parser.add_argument('--dst', type=lambda x: int(x, 0),
+                        help='Destination slave address')
+    parser.add_argument('--x', type=int, default=0,
+                        help='Draw X coordinate')
+    parser.add_argument('--y', type=int, default=0,
+                        help='Draw Y coordinate')
+    parser.add_argument('--font', choices=['12', '16'], default='16',
+                        help='Font size')
+    parser.add_argument('--clear-first', action='store_true',
+                        help='Clear display before drawing')
+    parser.add_argument('--full-refresh', action='store_true',
+                        help='Request full display refresh')
     parser.add_argument('--ping', action='store_true',
                         help='Send a ping command')
     parser.add_argument('--status', action='store_true',
                         help='Request MCU status')
 
     args = parser.parse_args()
+
+    try:
+        import serial
+    except ModuleNotFoundError:
+        print("pyserial is required. Install with: pip install pyserial")
+        sys.exit(1)
 
     # Open serial port
     try:
@@ -260,8 +323,29 @@ def main():
             frame = build_packet(PKT_TYPE_TEXT_DATA, data)
             send_and_wait_ack(ser, frame, "text")
 
+        elif args.draw_text is not None:
+            if args.dst is None:
+                print("--dst is required with --draw-text")
+                sys.exit(1)
+
+            try:
+                payload = encode_draw_text_payload(
+                    args.dst,
+                    args.x,
+                    args.y,
+                    args.font,
+                    args.clear_first,
+                    args.full_refresh,
+                    args.draw_text,
+                )
+            except ValueError as exc:
+                print(f"Invalid draw-text request: {exc}")
+                sys.exit(1)
+            frame = build_packet(PKT_TYPE_DRAW_TEXT, payload)
+            send_and_wait_ack(ser, frame, "DRAW_TEXT")
+
         else:
-            print("No action specified. Use --ping, --image, --email, or --text")
+            print("No action specified. Use --ping, --image, --email, --text, or --draw-text")
 
     finally:
         ser.close()
