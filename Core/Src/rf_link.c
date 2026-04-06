@@ -40,7 +40,7 @@ bool RfLink_TryReceiveFrame(RfFrame_t *out_frame)
         return false;
     }
 
-    return RfLink_IsForLocalNode(out_frame);
+    return true;
 }
 
 bool RfLink_IsForLocalNode(const RfFrame_t *frame)

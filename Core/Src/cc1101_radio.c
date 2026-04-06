@@ -282,6 +282,12 @@ static void Cc1101_FlushTxFifo(void)
     (void)Cc1101_Strobe(CC1101_STROBE_SFTX);
 }
 
+static bool Cc1101_RecoverRxAfterTxDisturbance(void)
+{
+    Cc1101_FlushTxFifo();
+    return Cc1101Radio_EnterRx();
+}
+
 static bool Cc1101_IsPacketReady(void)
 {
     const uint8_t rx_bytes_raw = Cc1101_ReadRxBytesRaw();
@@ -388,15 +394,19 @@ bool Cc1101Radio_Send(const uint8_t *payload, uint8_t length)
     Cc1101_FlushTxFifo();
 
     if (!Cc1101_WriteReg(CC1101_REG_FIFO, length)) {
+        (void)Cc1101_RecoverRxAfterTxDisturbance();
         return false;
     }
     if (!Cc1101_WriteBurst(CC1101_REG_FIFO, payload, length)) {
+        (void)Cc1101_RecoverRxAfterTxDisturbance();
         return false;
     }
     if (!Cc1101_Strobe(CC1101_STROBE_STX)) {
+        (void)Cc1101_RecoverRxAfterTxDisturbance();
         return false;
     }
     if (!Cc1101_WaitForTxDone(CC1101_TX_TIMEOUT_MS)) {
+        (void)Cc1101_RecoverRxAfterTxDisturbance();
         return false;
     }
 
