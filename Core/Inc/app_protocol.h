@@ -15,6 +15,7 @@
 #define APP_DRAW_FLAG_CLEAR_FIRST 0x01U
 #define APP_DRAW_FLAG_FULL_REFRESH 0x02U
 
+/* text is length-delimited payload data; it is not guaranteed to be NUL-terminated */
 typedef struct {
     uint8_t dst_addr;
     uint16_t x;
@@ -22,7 +23,7 @@ typedef struct {
     uint8_t font_id;
     uint8_t flags;
     uint8_t text_len;
-    uint8_t text[APP_TEXT_MAX_LEN + 1U];
+    uint8_t text[APP_TEXT_MAX_LEN];
 } AppDrawTextCommand_t;
 
 size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,

@@ -65,7 +65,6 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf,
     if (text_len > 0U) {
         memcpy(out_cmd->text, &buf[APP_DRAW_TEXT_FIXED_SIZE], text_len);
     }
-    out_cmd->text[text_len] = '\0';
 
     return true;
 }

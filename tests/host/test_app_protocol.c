@@ -5,9 +5,6 @@
 
 int main(void)
 {
-    _Static_assert(sizeof(((AppDrawTextCommand_t *)0)->text) == (APP_TEXT_MAX_LEN + 1U),
-                   "draw text storage must include room for a terminator");
-
     uint8_t encoded[64];
     AppDrawTextCommand_t cmd = {
         .dst_addr = 0x22U,
@@ -31,7 +28,6 @@ int main(void)
     assert(decoded.flags == (APP_DRAW_FLAG_CLEAR_FIRST | APP_DRAW_FLAG_FULL_REFRESH));
     assert(decoded.text_len == 5U);
     assert(memcmp(decoded.text, "Hello", 5U) == 0);
-    assert(decoded.text[5] == '\0');
 
     uint8_t long_encoded[128];
     AppDrawTextCommand_t long_cmd = {
@@ -51,7 +47,6 @@ int main(void)
     assert(AppProtocol_DecodeDrawText(long_encoded, long_used, &long_decoded));
     assert(long_decoded.text_len == APP_TEXT_MAX_LEN);
     assert(memcmp(long_decoded.text, long_cmd.text, APP_TEXT_MAX_LEN) == 0);
-    assert(long_decoded.text[APP_TEXT_MAX_LEN] == '\0');
 
     return 0;
 }
