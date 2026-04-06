@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "openperiph_config.h"
 #include "openperiph_board.h"
+#include "rf_link.h"
 #include "usbd_cdc_if.h"
 #include "ring_buffer.h"
 #include "usb_protocol.h"
@@ -106,6 +107,7 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   OpenPeriph_BoardInit();
+  RfLink_Init();
   /* Blink PC14 three times to confirm firmware is running */
   //For Debug
   for (int i = 0; i < 3; i++) {
