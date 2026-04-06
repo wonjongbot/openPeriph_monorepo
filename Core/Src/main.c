@@ -101,8 +101,8 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   MX_SPI1_Init();
-  OpenPeriph_BoardInit();
   /* USER CODE BEGIN 2 */
+  OpenPeriph_BoardInit();
   /* Blink PC14 three times to confirm firmware is running */
   //For Debug
   for (int i = 0; i < 3; i++) {
