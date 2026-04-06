@@ -23,11 +23,13 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "openperiph_config.h"
+#include "display_service.h"
 #include "openperiph_board.h"
 #include "rf_link.h"
 #include "usbd_cdc_if.h"
 #include "ring_buffer.h"
 #include "usb_protocol.h"
+#include <stdio.h>
 #include <string.h>
 /* USER CODE END Includes */
 
@@ -123,8 +125,19 @@ int main(void)
 
   /* Startup message */
   if (g_rf_link_ready) {
-      const char *hello = "\r\nopenPeriph USB Bridge v1.0 ready\r\n";
-      SendResponse(PKT_TYPE_STATUS, (const uint8_t *)hello, strlen(hello));
+      char hello[96];
+      const DisplayServicePanelInfo_t *display_info = DisplayService_GetPanelInfo();
+      int hello_len = snprintf(hello,
+          sizeof(hello),
+          "\r\nopenPeriph USB Bridge v1.0 ready (%ux%u)\r\n",
+          display_info->width_px,
+          display_info->height_px);
+      if (hello_len < 0) {
+          hello_len = 0;
+      } else if ((size_t)hello_len >= sizeof(hello)) {
+          hello_len = (int)(sizeof(hello) - 1U);
+      }
+      SendResponse(PKT_TYPE_STATUS, (const uint8_t *)hello, (uint16_t)hello_len);
   } else {
       const uint8_t rf_init_error = 0x10;
       SendResponse(PKT_TYPE_ERROR, &rf_init_error, 1);

@@ -2,6 +2,10 @@
 
 void OpenPeriph_BoardInit(void)
 {
+    HAL_GPIO_WritePin(OpenPeriph_RfCsPort(), OpenPeriph_RfCsPin(), GPIO_PIN_SET);
+    HAL_GPIO_WritePin(OpenPeriph_EpdCsPort(), OpenPeriph_EpdCsPin(), GPIO_PIN_SET);
+    HAL_GPIO_WritePin(OpenPeriph_EpdDcPort(), OpenPeriph_EpdDcPin(), GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(OpenPeriph_EpdRstPort(), OpenPeriph_EpdRstPin(), GPIO_PIN_SET);
 }
 
 GPIO_TypeDef *OpenPeriph_RfCsPort(void) { return GPIOC; }
