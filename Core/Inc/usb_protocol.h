@@ -50,6 +50,7 @@ typedef enum {
     PKT_TYPE_FILE_START     = 0x04,  /* Start of a multi-packet file transfer */
     PKT_TYPE_FILE_END       = 0x05,  /* End of multi-packet file transfer */
     PKT_TYPE_COMMAND        = 0x10,  /* Generic command to MCU */
+    PKT_TYPE_DRAW_TEXT      = 0x11,  /* Draw-text application payload */
 
     /* MCU -> PC */
     PKT_TYPE_ACK            = 0x80,  /* Acknowledge receipt */
