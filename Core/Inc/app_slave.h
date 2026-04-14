@@ -22,7 +22,7 @@ static inline void AppSlave_Poll(void)
         return;
     }
 
-    if (frame.msg_type == RF_MSG_PING) {
+    if ((frame.msg_type == RF_MSG_PING) && (frame.payload_len == 0U)) {
         RfFrame_t response = {
             .version = RF_FRAME_VERSION,
             .msg_type = RF_MSG_PONG,

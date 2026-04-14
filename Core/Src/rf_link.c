@@ -86,7 +86,8 @@ RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
             if ((rx_frame.msg_type == RF_MSG_PONG) &&
                 (rx_frame.src_addr == dst_addr) &&
                 (rx_frame.dst_addr == OPENPERIPH_NODE_ADDR) &&
-                (rx_frame.seq == seq)) {
+                (rx_frame.seq == seq) &&
+                (rx_frame.payload_len == 0U)) {
                 return RF_LINK_PING_RESULT_OK;
             }
         }
