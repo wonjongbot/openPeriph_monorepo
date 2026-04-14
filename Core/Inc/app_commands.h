@@ -16,7 +16,7 @@ bool OpenPeriph_RenderLocalHello(void);
 
 static inline bool AppCommands_HandleLocalCommand(const Packet_t *pkt)
 {
-    uint8_t status_payload[8];
+    uint8_t status_payload[10];
 
     if ((pkt == NULL) || (pkt->payload_len < 1U)) {
         OpenPeriph_SendUsbNack(pkt != NULL ? pkt->id : 0U, 0x03U);
@@ -54,6 +54,18 @@ static inline bool AppCommands_HandleLocalCommand(const Packet_t *pkt)
         status_payload[4] = (uint8_t)(OpenPeriph_GetUsbRxAvailable() >> 8);
         status_payload[5] = 0U;
         status_payload[6] = 0U;
+        {
+            uint8_t partnum = 0xFFU;
+            uint8_t version = 0xFFU;
+
+            if (Cc1101Radio_ReadChipInfo(&partnum, &version)) {
+                status_payload[8] = partnum;
+                status_payload[9] = version;
+            } else {
+                status_payload[8] = 0xFFU;
+                status_payload[9] = 0xFFU;
+            }
+        }
         OpenPeriph_SendUsbPacket(PKT_TYPE_STATUS, status_payload, sizeof(status_payload));
         return true;
 

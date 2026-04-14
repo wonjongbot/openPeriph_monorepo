@@ -17,5 +17,6 @@ bool Cc1101Radio_Receive(uint8_t *payload, uint8_t *in_out_length);
 bool Cc1101Radio_EnterRx(void);
 bool Cc1101Radio_RecoverRx(void);
 uint8_t Cc1101Radio_GetMarcState(void);
+bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version);
 
 #endif /* CC1101_RADIO_H */

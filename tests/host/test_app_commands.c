@@ -14,6 +14,8 @@ static uint8_t g_last_nack_id;
 static uint8_t g_last_nack_reason;
 static uint16_t g_usb_rx_available;
 static uint8_t g_radio_state;
+static uint8_t g_chip_partnum;
+static uint8_t g_chip_version;
 static bool g_recover_rx_called;
 static bool g_recover_rx_result;
 static bool g_local_hello_called;
@@ -53,6 +55,17 @@ uint8_t Cc1101Radio_GetMarcState(void)
     return g_radio_state;
 }
 
+bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version)
+{
+    if ((partnum == NULL) || (version == NULL)) {
+        return false;
+    }
+
+    *partnum = g_chip_partnum;
+    *version = g_chip_version;
+    return true;
+}
+
 bool Cc1101Radio_RecoverRx(void)
 {
     g_recover_rx_called = true;
@@ -76,6 +89,8 @@ static void ResetCaptures(void)
     g_last_ack_id = 0U;
     g_last_nack_id = 0U;
     g_last_nack_reason = 0U;
+    g_chip_partnum = 0x12U;
+    g_chip_version = 0x34U;
     g_recover_rx_called = false;
     g_recover_rx_result = true;
     g_local_hello_called = false;
@@ -97,12 +112,14 @@ int main(void)
 
     assert(AppCommands_HandleLocalCommand(&pkt));
     assert(g_last_type == PKT_TYPE_STATUS);
-    assert(g_last_payload_len == 8U);
+    assert(g_last_payload_len == 10U);
     assert(g_last_payload[0] == 1U);
     assert(g_last_payload[1] == 0U);
     assert(g_last_payload[2] == CC1101_RADIO_STATE_RX);
     assert(g_last_payload[3] == 0x34U);
     assert(g_last_payload[4] == 0x12U);
+    assert(g_last_payload[8] == 0x12U);
+    assert(g_last_payload[9] == 0x34U);
     assert(g_last_nack_id == 0U);
 
     ResetCaptures();
@@ -111,9 +128,11 @@ int main(void)
     assert(AppCommands_HandleLocalCommand(&pkt));
     assert(g_recover_rx_called);
     assert(g_last_type == PKT_TYPE_STATUS);
-    assert(g_last_payload_len == 8U);
+    assert(g_last_payload_len == 10U);
     assert(g_last_payload[2] == CC1101_RADIO_STATE_RX);
     assert(g_last_payload[7] == 1U);
+    assert(g_last_payload[8] == 0x12U);
+    assert(g_last_payload[9] == 0x34U);
 
     ResetCaptures();
     pkt.id = 0x44U;

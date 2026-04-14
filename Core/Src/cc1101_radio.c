@@ -50,6 +50,8 @@
 #define CC1101_REG_TEST2       0x2CU
 #define CC1101_REG_TEST1       0x2DU
 #define CC1101_REG_TEST0       0x2EU
+#define CC1101_REG_PARTNUM     0x30U
+#define CC1101_REG_VERSION     0x31U
 #define CC1101_REG_MARCSTATE   0x35U
 #define CC1101_REG_RXBYTES     0x3BU
 #define CC1101_REG_PATABLE     0x3EU
@@ -513,4 +515,20 @@ bool Cc1101Radio_EnterRx(void)
 uint8_t Cc1101Radio_GetMarcState(void)
 {
     return (uint8_t)(Cc1101_ReadStableStatus(CC1101_REG_MARCSTATE) & CC1101_STATUS_STATE_MASK);
+}
+
+bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version)
+{
+    if (!s_radio_initialized || (partnum == NULL) || (version == NULL)) {
+        return false;
+    }
+
+    if (!Cc1101_ReadSingle(CC1101_REG_PARTNUM, partnum)) {
+        return false;
+    }
+    if (!Cc1101_ReadSingle(CC1101_REG_VERSION, version)) {
+        return false;
+    }
+
+    return true;
 }
