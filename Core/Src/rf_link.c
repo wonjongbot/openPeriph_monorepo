@@ -74,7 +74,7 @@ RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
         uint32_t start_tick;
 
         if (!RfLink_SendFrame(&ping_frame)) {
-            continue;
+            return RF_LINK_PING_RESULT_SEND_FAIL;
         }
 
         result = RF_LINK_PING_RESULT_TIMEOUT;

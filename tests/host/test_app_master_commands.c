@@ -202,5 +202,29 @@ int main(void)
     assert(g_last_nack_id == 0x47U);
     assert(g_last_nack_reason == 0x06U);
 
+    ResetCaptures();
+    pkt.id = 0x48U;
+    pkt.payload_len = 3U;
+    pkt.payload[0] = CMD_RF_PING;
+    pkt.payload[1] = 0x22U;
+    pkt.payload[2] = 0x99U;
+    AppMaster_HandleUsbPacket(&pkt);
+
+    assert(g_last_ack_id == 0U);
+    assert(g_last_nack_id == 0x48U);
+    assert(g_last_nack_reason == 0x03U);
+
+    ResetCaptures();
+    pkt.id = 0x49U;
+    pkt.payload_len = 2U;
+    pkt.payload[0] = CMD_RF_PING;
+    pkt.payload[1] = 0x22U;
+    g_ping_result = RF_LINK_PING_RESULT_SEND_FAIL;
+    AppMaster_HandleUsbPacket(&pkt);
+
+    assert(g_last_ack_id == 0U);
+    assert(g_last_nack_id == 0x49U);
+    assert(g_last_nack_reason == 0x05U);
+
     return 0;
 }

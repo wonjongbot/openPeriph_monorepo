@@ -53,7 +53,7 @@ static inline bool AppMaster_HandleRfPingCommand(const Packet_t *pkt)
     RfLinkPingResult_t result;
     uint8_t dst_addr;
 
-    if ((pkt == NULL) || (pkt->payload_len < 2U)) {
+    if ((pkt == NULL) || (pkt->payload_len != 2U)) {
         OpenPeriph_SendUsbNack(pkt != NULL ? pkt->id : 0U, 0x03U);
         return true;
     }
