@@ -16,6 +16,7 @@ static uint16_t g_usb_rx_available;
 static uint8_t g_radio_state;
 static uint8_t g_chip_partnum;
 static uint8_t g_chip_version;
+static bool g_chip_info_result;
 static bool g_local_hello_called;
 static bool g_local_hello_result;
 
@@ -56,6 +57,9 @@ uint8_t Cc1101Radio_GetMarcState(void)
 bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version)
 {
     if ((partnum == NULL) || (version == NULL)) {
+        return false;
+    }
+    if (!g_chip_info_result) {
         return false;
     }
 
@@ -100,6 +104,7 @@ static void ResetCaptures(void)
     g_last_nack_reason = 0U;
     g_chip_partnum = 0x12U;
     g_chip_version = 0x34U;
+    g_chip_info_result = true;
     g_local_hello_called = false;
     g_local_hello_result = true;
 }
@@ -127,6 +132,17 @@ int main(void)
     assert(g_last_payload[4] == 0x12U);
     assert(g_last_payload[8] == 0x12U);
     assert(g_last_payload[9] == 0x34U);
+
+    ResetCaptures();
+    g_chip_info_result = false;
+    g_usb_rx_available = 0x1234U;
+    g_radio_state = CC1101_RADIO_STATE_RX;
+    AppMaster_HandleUsbPacket(&pkt);
+
+    assert(g_last_type == PKT_TYPE_STATUS);
+    assert(g_last_payload_len == 10U);
+    assert(g_last_payload[8] == 0xFFU);
+    assert(g_last_payload[9] == 0xFFU);
 
     ResetCaptures();
     pkt.id = 0x44U;

@@ -16,6 +16,7 @@ static uint16_t g_usb_rx_available;
 static uint8_t g_radio_state;
 static uint8_t g_chip_partnum;
 static uint8_t g_chip_version;
+static bool g_chip_info_result;
 static bool g_recover_rx_called;
 static bool g_recover_rx_result;
 static bool g_local_hello_called;
@@ -60,6 +61,9 @@ bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version)
     if ((partnum == NULL) || (version == NULL)) {
         return false;
     }
+    if (!g_chip_info_result) {
+        return false;
+    }
 
     *partnum = g_chip_partnum;
     *version = g_chip_version;
@@ -91,6 +95,7 @@ static void ResetCaptures(void)
     g_last_nack_reason = 0U;
     g_chip_partnum = 0x12U;
     g_chip_version = 0x34U;
+    g_chip_info_result = true;
     g_recover_rx_called = false;
     g_recover_rx_result = true;
     g_local_hello_called = false;
@@ -121,6 +126,17 @@ int main(void)
     assert(g_last_payload[8] == 0x12U);
     assert(g_last_payload[9] == 0x34U);
     assert(g_last_nack_id == 0U);
+
+    ResetCaptures();
+    g_chip_info_result = false;
+    g_usb_rx_available = 0x1234U;
+    g_radio_state = CC1101_RADIO_STATE_RX;
+
+    assert(AppCommands_HandleLocalCommand(&pkt));
+    assert(g_last_type == PKT_TYPE_STATUS);
+    assert(g_last_payload_len == 10U);
+    assert(g_last_payload[8] == 0xFFU);
+    assert(g_last_payload[9] == 0xFFU);
 
     ResetCaptures();
     g_radio_state = CC1101_RADIO_STATE_RXFIFO_OVERFLOW;

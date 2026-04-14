@@ -181,24 +181,40 @@ static bool Cc1101_ReadBurst(uint8_t addr, uint8_t *payload, uint8_t length)
     return Cc1101_Read(header, payload, length) == HAL_OK;
 }
 
-static uint8_t Cc1101_ReadStableStatus(uint8_t addr)
+static bool Cc1101_ReadStableStatusByte(uint8_t addr, uint8_t *value)
 {
     uint8_t first = 0U;
     uint8_t second = 0U;
 
+    if (value == NULL) {
+        return false;
+    }
+
     for (uint8_t attempt = 0U; attempt < 4U; ++attempt) {
         if (!Cc1101_ReadBurst(addr, &first, 1U)) {
-            return second;
+            return false;
         }
         if (!Cc1101_ReadBurst(addr, &second, 1U)) {
-            return second;
+            return false;
         }
         if (first == second) {
-            return second;
+            *value = second;
+            return true;
         }
     }
 
-    return second;
+    return false;
+}
+
+static uint8_t Cc1101_ReadStableStatus(uint8_t addr)
+{
+    uint8_t value = 0U;
+
+    if (!Cc1101_ReadStableStatusByte(addr, &value)) {
+        return 0U;
+    }
+
+    return value;
 }
 
 static uint8_t Cc1101_ReadRxBytesRaw(void)
@@ -523,10 +539,10 @@ bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version)
         return false;
     }
 
-    if (!Cc1101_ReadSingle(CC1101_REG_PARTNUM, partnum)) {
+    if (!Cc1101_ReadStableStatusByte(CC1101_REG_PARTNUM, partnum)) {
         return false;
     }
-    if (!Cc1101_ReadSingle(CC1101_REG_VERSION, version)) {
+    if (!Cc1101_ReadStableStatusByte(CC1101_REG_VERSION, version)) {
         return false;
     }
 
