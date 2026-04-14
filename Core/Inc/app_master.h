@@ -5,6 +5,7 @@
 #include "app_protocol.h"
 #include "cc1101_radio.h"
 #include "openperiph_config.h"
+#include "rf_draw_protocol.h"
 #include "rf_link.h"
 #include "usb_protocol.h"
 
@@ -17,35 +18,236 @@ void OpenPeriph_SendUsbPacket(PacketType_t type, const uint8_t *payload, uint16_
 uint16_t OpenPeriph_GetUsbRxAvailable(void);
 void OpenPeriph_ResetSystem(void);
 bool OpenPeriph_RenderLocalHello(void);
+extern uint32_t HAL_GetTick(void);
 
 static inline void AppMaster_Init(void)
 {
 }
 
-static inline bool AppMaster_SendDrawText(const Packet_t *pkt)
+static inline bool AppMaster_WaitForDrawResponse(uint8_t dst_addr,
+                                                 uint8_t seq,
+                                                 uint8_t expected_phase,
+                                                 uint8_t expected_value,
+                                                 uint32_t absolute_start_tick,
+                                                 uint32_t attempt_start_tick,
+                                                 uint8_t *out_nack_reason)
 {
-    AppDrawTextCommand_t cmd;
+    RfFrame_t response;
+
+    if (out_nack_reason != NULL) {
+        *out_nack_reason = 0x05U;
+    }
+
+    while (((HAL_GetTick() - attempt_start_tick) < RF_LINK_ATTEMPT_TIMEOUT_MS) &&
+           ((HAL_GetTick() - absolute_start_tick) < RF_LINK_DRAW_TOTAL_TIMEOUT_MS)) {
+        RfDrawAck_t ack;
+        RfDrawError_t error;
+
+        if (!RfLink_TryReceiveFrame(&response)) {
+            continue;
+        }
+        if ((response.version != RF_FRAME_VERSION) ||
+            (response.src_addr != dst_addr) ||
+            (response.dst_addr != OPENPERIPH_NODE_ADDR) ||
+            (response.seq != seq)) {
+            continue;
+        }
+
+        if (response.msg_type == RF_MSG_DRAW_ACK) {
+            if (!RfDrawProtocol_DecodeAck(response.payload, response.payload_len, &ack)) {
+                continue;
+            }
+            if ((ack.phase == expected_phase) && (ack.value == expected_value)) {
+                return true;
+            }
+            continue;
+        }
+
+        if (response.msg_type == RF_MSG_DRAW_ERROR) {
+            if ((out_nack_reason != NULL) &&
+                RfDrawProtocol_DecodeError(response.payload, response.payload_len, &error)) {
+                *out_nack_reason = error.reason;
+                return false;
+            }
+            continue;
+        }
+    }
+
+    return false;
+}
+
+static inline bool AppMaster_ExchangeDrawFrame(const RfFrame_t *frame,
+                                               uint8_t expected_phase,
+                                               uint8_t expected_value,
+                                               uint8_t *out_nack_reason)
+{
+    const uint32_t absolute_start_tick = HAL_GetTick();
+
+    if (frame == NULL) {
+        return false;
+    }
+
+    if (out_nack_reason != NULL) {
+        *out_nack_reason = 0x05U;
+    }
+
+    for (uint8_t attempt = 0U;
+         (attempt < RF_LINK_MAX_RETRIES) &&
+         ((HAL_GetTick() - absolute_start_tick) < RF_LINK_DRAW_TOTAL_TIMEOUT_MS);
+         ++attempt) {
+        uint32_t attempt_start_tick;
+
+        if (!RfLink_SendFrame(frame)) {
+            continue;
+        }
+
+        attempt_start_tick = HAL_GetTick();
+        if (AppMaster_WaitForDrawResponse(frame->dst_addr,
+                                          frame->seq,
+                                          expected_phase,
+                                          expected_value,
+                                          absolute_start_tick,
+                                          attempt_start_tick,
+                                          out_nack_reason)) {
+            return true;
+        }
+
+        if ((out_nack_reason != NULL) && (*out_nack_reason != 0x05U)) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+static inline bool AppMaster_ExchangeDrawStart(const AppDrawTextCommand_t *cmd,
+                                               uint8_t seq,
+                                               uint8_t *out_nack_reason)
+{
+    RfDrawStart_t start;
     RfFrame_t frame = {0};
 
-    if ((pkt == NULL) || !AppProtocol_DecodeDrawText(pkt->payload, pkt->payload_len, &cmd)) {
+    if (cmd == NULL) {
+        return false;
+    }
+
+    start.x = cmd->x;
+    start.y = cmd->y;
+    start.font_id = cmd->font_id;
+    start.flags = cmd->flags;
+    start.total_text_len = cmd->text_len;
+
+    frame.version = RF_FRAME_VERSION;
+    frame.msg_type = RF_MSG_DRAW_START;
+    frame.dst_addr = cmd->dst_addr;
+    frame.src_addr = OPENPERIPH_NODE_ADDR;
+    frame.seq = seq;
+    frame.payload_len = (uint8_t)RfDrawProtocol_EncodeStart(&start, frame.payload, sizeof(frame.payload));
+    if (frame.payload_len != RF_DRAW_START_PAYLOAD_LEN) {
+        return false;
+    }
+
+    return AppMaster_ExchangeDrawFrame(&frame, RF_DRAW_PHASE_START, 0U, out_nack_reason);
+}
+
+static inline bool AppMaster_ExchangeDrawChunk(const AppDrawTextCommand_t *cmd,
+                                               uint8_t seq,
+                                               uint8_t chunk_index,
+                                               const uint8_t *chunk_data,
+                                               uint8_t chunk_len,
+                                               uint8_t *out_nack_reason)
+{
+    RfDrawChunk_t chunk = {0};
+    RfFrame_t frame = {0};
+
+    if ((cmd == NULL) || (chunk_len > RF_DRAW_CHUNK_MAX_DATA)) {
+        return false;
+    }
+
+    chunk.chunk_index = chunk_index;
+    chunk.chunk_len = chunk_len;
+    if ((chunk_data != NULL) && (chunk_len > 0U)) {
+        for (uint8_t i = 0U; i < chunk_len; ++i) {
+            chunk.data[i] = chunk_data[i];
+        }
+    }
+
+    frame.version = RF_FRAME_VERSION;
+    frame.msg_type = RF_MSG_DRAW_CHUNK;
+    frame.dst_addr = cmd->dst_addr;
+    frame.src_addr = OPENPERIPH_NODE_ADDR;
+    frame.seq = seq;
+    frame.payload_len = (uint8_t)RfDrawProtocol_EncodeChunk(&chunk, frame.payload, sizeof(frame.payload));
+    if (frame.payload_len != (uint8_t)(RF_DRAW_CHUNK_HEADER_LEN + chunk_len)) {
+        return false;
+    }
+
+    return AppMaster_ExchangeDrawFrame(&frame,
+                                       RF_DRAW_PHASE_CHUNK,
+                                       chunk_index,
+                                       out_nack_reason);
+}
+
+static inline bool AppMaster_ExchangeDrawCommit(const AppDrawTextCommand_t *cmd,
+                                                uint8_t seq,
+                                                uint8_t *out_nack_reason)
+{
+    RfFrame_t frame = {0};
+
+    if (cmd == NULL) {
         return false;
     }
 
     frame.version = RF_FRAME_VERSION;
-    frame.msg_type = RF_MSG_DRAW_START;
-    frame.dst_addr = cmd.dst_addr;
+    frame.msg_type = RF_MSG_DRAW_COMMIT;
+    frame.dst_addr = cmd->dst_addr;
     frame.src_addr = OPENPERIPH_NODE_ADDR;
-    frame.seq = pkt->id;
-    frame.payload_len = (uint8_t)pkt->payload_len;
-    if (frame.payload_len > RF_FRAME_MAX_PAYLOAD) {
+    frame.seq = seq;
+    frame.payload_len = 0U;
+
+    return AppMaster_ExchangeDrawFrame(&frame, RF_DRAW_PHASE_COMMIT, 0U, out_nack_reason);
+}
+
+static inline bool AppMaster_SendDrawText(const Packet_t *pkt, uint8_t *out_nack_reason)
+{
+    AppDrawTextCommand_t cmd;
+    size_t offset = 0U;
+    uint8_t chunk_index = 0U;
+
+    if (out_nack_reason != NULL) {
+        *out_nack_reason = 0x05U;
+    }
+
+    if ((pkt == NULL) || !AppProtocol_DecodeDrawText(pkt->payload, pkt->payload_len, &cmd)) {
+        return false;
+    }
+    if (cmd.text_len == 0U) {
+        return false;
+    }
+    if (!AppMaster_ExchangeDrawStart(&cmd, pkt->id, out_nack_reason)) {
         return false;
     }
 
-    for (uint8_t i = 0; i < frame.payload_len; ++i) {
-        frame.payload[i] = pkt->payload[i];
+    while (offset < (size_t)cmd.text_len) {
+        size_t remaining = (size_t)cmd.text_len - offset;
+        uint8_t chunk_len = (remaining > RF_DRAW_CHUNK_MAX_DATA)
+                                ? RF_DRAW_CHUNK_MAX_DATA
+                                : (uint8_t)remaining;
+
+        if (!AppMaster_ExchangeDrawChunk(&cmd,
+                                         pkt->id,
+                                         chunk_index,
+                                         &cmd.text[offset],
+                                         chunk_len,
+                                         out_nack_reason)) {
+            return false;
+        }
+
+        offset += chunk_len;
+        ++chunk_index;
     }
 
-    return RfLink_SendFrame(&frame);
+    return AppMaster_ExchangeDrawCommit(&cmd, pkt->id, out_nack_reason);
 }
 
 static inline bool AppMaster_HandleRfPingCommand(const Packet_t *pkt)
@@ -103,12 +305,16 @@ static inline void AppMaster_HandleUsbPacket(const Packet_t *pkt)
 
     switch (pkt->type) {
     case PKT_TYPE_DRAW_TEXT:
-        if (AppMaster_SendDrawText(pkt)) {
+    {
+        uint8_t nack_reason = 0x05U;
+
+        if (AppMaster_SendDrawText(pkt, &nack_reason)) {
             OpenPeriph_SendUsbAck(pkt->id);
         } else {
-            OpenPeriph_SendUsbNack(pkt->id, 0x05U);
+            OpenPeriph_SendUsbNack(pkt->id, nack_reason);
         }
         break;
+    }
 
     case PKT_TYPE_COMMAND:
         AppMaster_HandleCommand(pkt);
