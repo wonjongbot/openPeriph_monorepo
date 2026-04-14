@@ -10,6 +10,8 @@
 
 typedef enum {
     RF_MSG_DRAW_TEXT = 0x01,
+    RF_MSG_PING = 0x02,
+    RF_MSG_PONG = 0x03,
     RF_MSG_ACK = 0x80,
     RF_MSG_ERROR = 0x81,
 } RfMessageType_t;

@@ -31,5 +31,22 @@ int main(void)
     assert(decoded.payload[0] == 'H');
     assert(decoded.payload[1] == 'i');
 
+    RfFrame_t ping_frame = {
+        .version = RF_FRAME_VERSION,
+        .msg_type = RF_MSG_PING,
+        .dst_addr = 0x22U,
+        .src_addr = 0x01U,
+        .seq = 0x06U,
+        .payload_len = 0U,
+    };
+
+    used = RfFrame_Encode(&ping_frame, encoded, sizeof(encoded));
+    assert(used == 6U);
+
+    memset(&decoded, 0, sizeof(decoded));
+    assert(RfFrame_Decode(encoded, used, &decoded));
+    assert(decoded.msg_type == RF_MSG_PING);
+    assert(decoded.payload_len == 0U);
+
     return 0;
 }

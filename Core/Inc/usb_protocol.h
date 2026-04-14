@@ -71,6 +71,7 @@ typedef enum {
     CMD_GET_STATUS      = 0x04,  /* Request status report */
     CMD_SET_RF_ADDR     = 0x05,  /* Set CC1101 device address */
     CMD_LOCAL_HELLO     = 0x06,  /* Render a local display hello-world test */
+    CMD_RF_PING         = 0x07,  /* Send RF ping and wait for pong */
 } CommandID_t;
 
 /* ---------- Parsed packet structure ---------- */

@@ -19,6 +19,9 @@ static uint8_t g_chip_version;
 static bool g_chip_info_result;
 static bool g_local_hello_called;
 static bool g_local_hello_result;
+static RfLinkPingResult_t g_ping_result;
+static uint8_t g_last_ping_dst;
+static uint8_t g_last_ping_seq;
 
 void OpenPeriph_SendUsbAck(uint8_t packet_id)
 {
@@ -94,6 +97,13 @@ bool RfLink_SendFrame(const RfFrame_t *frame)
     return false;
 }
 
+RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
+{
+    g_last_ping_dst = dst_addr;
+    g_last_ping_seq = seq;
+    return g_ping_result;
+}
+
 static void ResetCaptures(void)
 {
     g_last_type = (PacketType_t)0;
@@ -107,6 +117,9 @@ static void ResetCaptures(void)
     g_chip_info_result = true;
     g_local_hello_called = false;
     g_local_hello_result = true;
+    g_ping_result = RF_LINK_PING_RESULT_OK;
+    g_last_ping_dst = 0U;
+    g_last_ping_seq = 0U;
 }
 
 int main(void)
@@ -163,6 +176,31 @@ int main(void)
     assert(g_local_hello_called);
     assert(g_last_nack_id == 0x45U);
     assert(g_last_nack_reason == 0x05U);
+
+    ResetCaptures();
+    pkt.id = 0x46U;
+    pkt.payload_len = 2U;
+    pkt.payload[0] = CMD_RF_PING;
+    pkt.payload[1] = 0x22U;
+    g_ping_result = RF_LINK_PING_RESULT_OK;
+    AppMaster_HandleUsbPacket(&pkt);
+
+    assert(g_last_ack_id == 0x46U);
+    assert(g_last_nack_id == 0U);
+    assert(g_last_ping_dst == 0x22U);
+    assert(g_last_ping_seq == 0x46U);
+
+    ResetCaptures();
+    pkt.id = 0x47U;
+    pkt.payload_len = 2U;
+    pkt.payload[0] = CMD_RF_PING;
+    pkt.payload[1] = 0x22U;
+    g_ping_result = RF_LINK_PING_RESULT_TIMEOUT;
+    AppMaster_HandleUsbPacket(&pkt);
+
+    assert(g_last_ack_id == 0U);
+    assert(g_last_nack_id == 0x47U);
+    assert(g_last_nack_reason == 0x06U);
 
     return 0;
 }

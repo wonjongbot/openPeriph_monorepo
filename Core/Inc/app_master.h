@@ -48,8 +48,48 @@ static inline bool AppMaster_SendDrawText(const Packet_t *pkt)
     return RfLink_SendFrame(&frame);
 }
 
+static inline bool AppMaster_HandleRfPingCommand(const Packet_t *pkt)
+{
+    RfLinkPingResult_t result;
+    uint8_t dst_addr;
+
+    if ((pkt == NULL) || (pkt->payload_len < 2U)) {
+        OpenPeriph_SendUsbNack(pkt != NULL ? pkt->id : 0U, 0x03U);
+        return true;
+    }
+
+    dst_addr = pkt->payload[1];
+    if (dst_addr == OPENPERIPH_NODE_ADDR) {
+        OpenPeriph_SendUsbNack(pkt->id, 0x07U);
+        return true;
+    }
+
+    result = RfLink_SendPingAndWaitForPong(dst_addr, pkt->id);
+    switch (result) {
+    case RF_LINK_PING_RESULT_OK:
+        OpenPeriph_SendUsbAck(pkt->id);
+        break;
+
+    case RF_LINK_PING_RESULT_TIMEOUT:
+        OpenPeriph_SendUsbNack(pkt->id, 0x06U);
+        break;
+
+    case RF_LINK_PING_RESULT_SEND_FAIL:
+    default:
+        OpenPeriph_SendUsbNack(pkt->id, 0x05U);
+        break;
+    }
+
+    return true;
+}
+
 static inline void AppMaster_HandleCommand(const Packet_t *pkt)
 {
+    if ((pkt != NULL) && (pkt->payload_len >= 1U) && (pkt->payload[0] == CMD_RF_PING)) {
+        (void)AppMaster_HandleRfPingCommand(pkt);
+        return;
+    }
+
     if (!AppCommands_HandleLocalCommand(pkt)) {
         OpenPeriph_SendUsbNack(pkt->id, 0x04U);
     }

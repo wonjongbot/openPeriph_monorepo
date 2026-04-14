@@ -21,6 +21,20 @@ static inline void AppSlave_Poll(void)
     if (!RfLink_IsForLocalNode(&frame)) {
         return;
     }
+
+    if (frame.msg_type == RF_MSG_PING) {
+        RfFrame_t response = {
+            .version = RF_FRAME_VERSION,
+            .msg_type = RF_MSG_PONG,
+            .dst_addr = frame.src_addr,
+            .src_addr = OPENPERIPH_NODE_ADDR,
+            .seq = frame.seq,
+            .payload_len = 0U,
+        };
+
+        (void)RfLink_SendFrame(&response);
+        return;
+    }
     if (frame.msg_type != RF_MSG_DRAW_TEXT) {
         return;
     }
