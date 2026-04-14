@@ -38,6 +38,7 @@ PKT_TYPE_STATUS      = 0x82
 CMD_PING             = 0x00
 CMD_GET_STATUS       = 0x04
 CMD_LOCAL_HELLO      = 0x06
+CMD_RF_PING          = 0x07
 
 APP_FONT_12 = 0x01
 APP_FONT_16 = 0x02
@@ -202,6 +203,9 @@ def send_get_status(ser):
             print(f"  CC1101 MARCSTATE: 0x{p[2]:02X}")
             print(f"  RX buffer used: {p[3] | (p[4] << 8)} bytes")
             print(f"  Error count: {p[5] | (p[6] << 8)}")
+            if len(p) >= 10:
+                print(f"  CC1101 PARTNUM: 0x{p[8]:02X}")
+                print(f"  CC1101 VERSION: 0x{p[9]:02X}")
             if p[7] == 1:
                 print("  Radio recovery: recovered to RX")
             elif p[7] == 2:
@@ -221,6 +225,39 @@ def send_local_hello(ser):
     payload = bytes([CMD_LOCAL_HELLO])
     frame = build_packet(PKT_TYPE_COMMAND, payload)
     send_and_wait_ack(ser, frame, "LOCAL_HELLO")
+
+def send_rf_ping(ser, dst_addr):
+    if not 0 <= dst_addr <= 0xFF:
+        raise ValueError("destination address must fit in 0..255")
+
+    payload = bytes([CMD_RF_PING, dst_addr])
+    frame = build_packet(PKT_TYPE_COMMAND, payload)
+    ser.write(frame)
+    print(f"Sent RF_PING to 0x{dst_addr:02X}")
+
+    start = time.monotonic()
+    resp = read_response(ser)
+    rtt_ms = int((time.monotonic() - start) * 1000)
+
+    if resp['valid'] and resp['type'] == PKT_TYPE_ACK:
+        print(f"PONG from 0x{dst_addr:02X} (host RTT {rtt_ms} ms)")
+        return True
+
+    if resp['valid'] and resp['type'] == PKT_TYPE_NACK:
+        if len(resp['payload']) >= 2:
+            reason = resp['payload'][1]
+            if reason == 0x06:
+                print(f"No RF pong from node 0x{dst_addr:02X}")
+            elif reason == 0x07:
+                print(f"Invalid RF ping destination: 0x{dst_addr:02X}")
+            else:
+                print(f"RF ping failed (reason=0x{reason:02X})")
+        else:
+            print("No valid RF ping response.")
+        return False
+
+    print("No valid RF ping response.")
+    return False
 
 def encode_draw_text_payload(dst: int,
                              x: int,
@@ -287,6 +324,8 @@ def main():
                         help='Send a ping command')
     parser.add_argument('--status', action='store_true',
                         help='Request MCU status')
+    parser.add_argument('--rf-ping', type=lambda x: int(x, 0),
+                        help='Send an RF ping to the given destination address')
     parser.add_argument('--local-hello', action='store_true',
                         help='Render local Hello World on the connected board EPD')
 
@@ -315,6 +354,9 @@ def main():
 
         if args.ping:
             send_ping(ser)
+
+        elif args.rf_ping is not None:
+            send_rf_ping(ser, args.rf_ping)
 
         elif args.status:
             send_get_status(ser)
@@ -366,7 +408,7 @@ def main():
             send_and_wait_ack(ser, frame, "DRAW_TEXT")
 
         else:
-            print("No action specified. Use --ping, --image, --email, --text, or --draw-text")
+            print("No action specified. Use --ping, --rf-ping, --image, --email, --text, or --draw-text")
 
     finally:
         ser.close()
