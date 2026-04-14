@@ -21,6 +21,7 @@ This keeps only one RF packet in flight at a time, makes retransmission determin
 - Ensure a new draw transaction can always replace a stuck partial transaction on the slave.
 - Bound all retries so the master never blocks forever waiting on RF.
 - Preserve the existing `rf_ping` diagnostic while moving it to the same bounded-request pattern.
+- Make host-side diagnostics expose retry behavior clearly enough to guide later RF tuning and hardware triage.
 
 ## Non-Goals
 
@@ -28,6 +29,7 @@ This keeps only one RF packet in flight at a time, makes retransmission determin
 - General reliable RF transport for arbitrary application types.
 - Supporting more than one staged draw transaction on the slave at a time.
 - Solving root-cause RF weakness in hardware or CC1101 tuning in the same patch.
+- Building a production-grade RF benchmark suite beyond a focused bench diagnostic helper.
 
 ## Current Context
 
@@ -211,6 +213,21 @@ Each RF request/response wait uses a short per-attempt timeout similar to the cu
 - bounded retries
 - bounded total command time
 
+### Retry Telemetry
+
+The master should count how many retries were needed for:
+
+- `DRAW_START`
+- each `DRAW_CHUNK`
+- `DRAW_COMMIT`
+- `rf_ping`
+
+This data should be surfaced to the host so bench tests can distinguish:
+
+- success with no retries
+- success after retries
+- total failure after exhausting retries or timing out
+
 ## Master Flow
 
 When the master receives `PKT_TYPE_DRAW_TEXT` over USB:
@@ -270,6 +287,40 @@ The exact NACK reason bytes can be allocated during implementation, but they mus
 
 This keeps ping behavior consistent with the new draw transport philosophy.
 
+## Host Diagnostics
+
+### Default CLI Reporting
+
+The host script should print retry information for staged draws and RF ping. Successful commands should report enough information to show whether the link is barely working or comfortably working.
+
+Recommended examples:
+
+- `DRAW_TEXT ok: 4 chunks, 2 retries, 184 ms`
+- `PONG from 0x22: 1 retry, 96 ms`
+- `DRAW_TEXT failed: timeout after 8 retries on chunk 3`
+
+### Bench Diagnostic Mode
+
+Add a focused host-side diagnostic mode for repeated RF reliability testing. This mode should send a controlled stream of RF operations and summarize:
+
+- total transactions attempted
+- total transactions succeeded
+- total transactions failed
+- aggregate retries
+- average retries per successful transaction
+- failure rate
+
+Recommended first cut:
+
+- a repeated RF ping test because it isolates link reliability from EPD rendering time
+- an optional repeated staged draw test using a fixed short text payload
+
+Example summary:
+
+- `100 attempts, 81 success, 19 failed, 47 total retries, failure rate 19.0%`
+
+This does not need to become a full soak-test framework. A deterministic CLI helper that can be run on the bench is enough for now.
+
 ## Testing
 
 Host-side tests should cover:
@@ -281,12 +332,14 @@ Host-side tests should cover:
 - successful staged draw ACKs only after slave draw success
 - master times out after bounded retries / absolute deadline
 - `rf_ping` respects both retry count and total timeout
+- host CLI reports retry counts and summarized failure statistics
 
 Manual bench validation should check:
 
 - repeated retries do not leave the slave stuck
 - starting a new draw after interrupting a previous one works reliably
 - shorter chunks improve effective success rate on the current hardware
+- repeated diagnostic runs provide stable retry/failure metrics that can be compared before and after any later RF tuning or hardware changes
 
 ## Hardware Triage Notes
 
