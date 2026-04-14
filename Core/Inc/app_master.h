@@ -1,6 +1,7 @@
 #ifndef APP_MASTER_H
 #define APP_MASTER_H
 
+#include "app_commands.h"
 #include "app_protocol.h"
 #include "cc1101_radio.h"
 #include "openperiph_config.h"
@@ -49,56 +50,8 @@ static inline bool AppMaster_SendDrawText(const Packet_t *pkt)
 
 static inline void AppMaster_HandleCommand(const Packet_t *pkt)
 {
-    uint8_t status_payload[8];
-
-    if ((pkt == NULL) || (pkt->payload_len < 1U)) {
-        OpenPeriph_SendUsbNack(pkt != NULL ? pkt->id : 0U, 0x03U);
-        return;
-    }
-
-    switch ((CommandID_t)pkt->payload[0]) {
-    case CMD_PING:
-        OpenPeriph_SendUsbAck(pkt->id);
-        break;
-
-    case CMD_RESET:
-        OpenPeriph_SendUsbAck(pkt->id);
-        OpenPeriph_ResetSystem();
-        break;
-
-    case CMD_GET_STATUS:
-        status_payload[0] = 1U;
-        status_payload[1] = 0U;
-        status_payload[2] = Cc1101Radio_GetMarcState();
-        status_payload[3] = (uint8_t)(OpenPeriph_GetUsbRxAvailable() & 0xFFU);
-        status_payload[4] = (uint8_t)(OpenPeriph_GetUsbRxAvailable() >> 8);
-        status_payload[5] = 0U;
-        status_payload[6] = 0U;
-        status_payload[7] = 0U;
-        OpenPeriph_SendUsbPacket(PKT_TYPE_STATUS, status_payload, sizeof(status_payload));
-        break;
-
-    case CMD_LOCAL_HELLO:
-        if (OpenPeriph_RenderLocalHello()) {
-            OpenPeriph_SendUsbAck(pkt->id);
-        } else {
-            OpenPeriph_SendUsbNack(pkt->id, 0x05U);
-        }
-        break;
-
-    case CMD_SET_RF_CHANNEL:
-    case CMD_SET_RF_POWER:
-    case CMD_SET_RF_ADDR:
-        if (pkt->payload_len >= 2U) {
-            OpenPeriph_SendUsbAck(pkt->id);
-        } else {
-            OpenPeriph_SendUsbNack(pkt->id, 0x03U);
-        }
-        break;
-
-    default:
+    if (!AppCommands_HandleLocalCommand(pkt)) {
         OpenPeriph_SendUsbNack(pkt->id, 0x04U);
-        break;
     }
 }
 

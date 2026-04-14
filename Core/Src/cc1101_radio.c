@@ -67,9 +67,6 @@
 #define CC1101_READ_BURST      0xC0U
 
 #define CC1101_STATE_IDLE              0x01U
-#define CC1101_STATE_RX                0x0DU
-#define CC1101_STATE_TXFIFO_UNDERFLOW  0x16U
-
 #define CC1101_STATUS_STATE_MASK       0x1FU
 #define CC1101_STATUS_RX_BYTES_MASK    0x7FU
 #define CC1101_STATUS_RX_OVERFLOW      0x80U
@@ -299,6 +296,17 @@ static bool Cc1101_RecoverRxAfterTxDisturbance(void)
     return Cc1101Radio_EnterRx();
 }
 
+bool Cc1101Radio_RecoverRx(void)
+{
+    if (!s_radio_initialized) {
+        return false;
+    }
+
+    Cc1101_FlushRxFifo();
+    Cc1101_FlushTxFifo();
+    return Cc1101Radio_EnterRx();
+}
+
 static bool Cc1101_IsPacketReady(void)
 {
     const uint8_t rx_bytes_raw = Cc1101_ReadRxBytesRaw();
@@ -325,7 +333,7 @@ static bool Cc1101_WaitForTxDone(uint32_t timeout_ms)
         if (marc_state == CC1101_STATE_IDLE) {
             return true;
         }
-        if (marc_state == CC1101_STATE_TXFIFO_UNDERFLOW) {
+        if (marc_state == CC1101_RADIO_STATE_TXFIFO_UNDERFLOW) {
             Cc1101_FlushTxFifo();
             return false;
         }
@@ -403,6 +411,11 @@ bool Cc1101Radio_Reset(void)
 bool Cc1101Radio_Send(const uint8_t *payload, uint8_t length)
 {
     if (!s_radio_initialized || payload == NULL || length == 0U || length > CC1101_RADIO_MAX_PACKET_LEN) {
+        return false;
+    }
+
+    if ((Cc1101Radio_GetMarcState() == CC1101_RADIO_STATE_RXFIFO_OVERFLOW) &&
+        !Cc1101Radio_RecoverRx()) {
         return false;
     }
 
@@ -488,7 +501,7 @@ bool Cc1101Radio_EnterRx(void)
         return false;
     }
 
-    while (Cc1101Radio_GetMarcState() != CC1101_STATE_RX) {
+    while (Cc1101Radio_GetMarcState() != CC1101_RADIO_STATE_RX) {
         if ((HAL_GetTick() - start_tick) >= CC1101_IO_TIMEOUT_MS) {
             return false;
         }

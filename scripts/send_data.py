@@ -202,8 +202,18 @@ def send_get_status(ser):
             print(f"  CC1101 MARCSTATE: 0x{p[2]:02X}")
             print(f"  RX buffer used: {p[3] | (p[4] << 8)} bytes")
             print(f"  Error count: {p[5] | (p[6] << 8)}")
+            if p[7] == 1:
+                print("  Radio recovery: recovered to RX")
+            elif p[7] == 2:
+                print("  Radio recovery: failed")
         else:
             print(f"  Status payload: {p.hex()}")
+    elif resp['valid'] and resp['type'] == PKT_TYPE_NACK:
+        p = resp['payload']
+        if len(p) >= 2:
+            print(f"  NACK received (id={p[0]}, reason=0x{p[1]:02X})")
+        else:
+            print(f"  NACK received (payload={p.hex()})")
     else:
         print("No valid status response.")
 

@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "openperiph_config.h"
+#include "app_commands.h"
 #include "app_master.h"
 #include "app_slave.h"
 #include "display_service.h"
@@ -448,17 +449,8 @@ static void ProcessPacket(const Packet_t *pkt)
         break;
 
     case PKT_TYPE_COMMAND:
-        if ((pkt->payload_len >= 1U) && ((CommandID_t)pkt->payload[0] == CMD_LOCAL_HELLO)) {
-            if (OpenPeriph_RenderLocalHello()) {
-                uint16_t len = Protocol_BuildACK(&g_parser, pkt->id, g_tx_buf);
-                CDC_Transmit_Blocking(g_tx_buf, len, 100);
-            } else {
-                uint16_t len = Protocol_BuildNACK(&g_parser, pkt->id, 0x05U, g_tx_buf);
-                CDC_Transmit_Blocking(g_tx_buf, len, 100);
-            }
-        } else {
-            uint16_t len = Protocol_BuildNACK(&g_parser, pkt->id, 0x04U, g_tx_buf);
-            CDC_Transmit_Blocking(g_tx_buf, len, 100);
+        if (!AppCommands_HandleLocalCommand(pkt)) {
+            OpenPeriph_SendUsbNack(pkt->id, 0x04U);
         }
         break;
 

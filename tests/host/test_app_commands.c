@@ -1,4 +1,4 @@
-#include "app_master.h"
+#include "app_commands.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -14,6 +14,8 @@ static uint8_t g_last_nack_id;
 static uint8_t g_last_nack_reason;
 static uint16_t g_usb_rx_available;
 static uint8_t g_radio_state;
+static bool g_recover_rx_called;
+static bool g_recover_rx_result;
 static bool g_local_hello_called;
 static bool g_local_hello_result;
 
@@ -53,28 +55,17 @@ uint8_t Cc1101Radio_GetMarcState(void)
 
 bool Cc1101Radio_RecoverRx(void)
 {
-    g_radio_state = CC1101_RADIO_STATE_RX;
-    return true;
+    g_recover_rx_called = true;
+    if (g_recover_rx_result) {
+        g_radio_state = CC1101_RADIO_STATE_RX;
+    }
+    return g_recover_rx_result;
 }
 
 bool OpenPeriph_RenderLocalHello(void)
 {
     g_local_hello_called = true;
     return g_local_hello_result;
-}
-
-bool AppProtocol_DecodeDrawText(const uint8_t *buf, size_t len, AppDrawTextCommand_t *out_cmd)
-{
-    (void)buf;
-    (void)len;
-    (void)out_cmd;
-    return false;
-}
-
-bool RfLink_SendFrame(const RfFrame_t *frame)
-{
-    (void)frame;
-    return false;
 }
 
 static void ResetCaptures(void)
@@ -85,6 +76,8 @@ static void ResetCaptures(void)
     g_last_ack_id = 0U;
     g_last_nack_id = 0U;
     g_last_nack_reason = 0U;
+    g_recover_rx_called = false;
+    g_recover_rx_result = true;
     g_local_hello_called = false;
     g_local_hello_result = true;
 }
@@ -101,8 +94,8 @@ int main(void)
     ResetCaptures();
     g_usb_rx_available = 0x1234U;
     g_radio_state = CC1101_RADIO_STATE_RX;
-    AppMaster_HandleUsbPacket(&pkt);
 
+    assert(AppCommands_HandleLocalCommand(&pkt));
     assert(g_last_type == PKT_TYPE_STATUS);
     assert(g_last_payload_len == 8U);
     assert(g_last_payload[0] == 1U);
@@ -110,26 +103,35 @@ int main(void)
     assert(g_last_payload[2] == CC1101_RADIO_STATE_RX);
     assert(g_last_payload[3] == 0x34U);
     assert(g_last_payload[4] == 0x12U);
+    assert(g_last_nack_id == 0U);
+
+    ResetCaptures();
+    g_radio_state = CC1101_RADIO_STATE_RXFIFO_OVERFLOW;
+
+    assert(AppCommands_HandleLocalCommand(&pkt));
+    assert(g_recover_rx_called);
+    assert(g_last_type == PKT_TYPE_STATUS);
+    assert(g_last_payload_len == 8U);
+    assert(g_last_payload[2] == CC1101_RADIO_STATE_RX);
+    assert(g_last_payload[7] == 1U);
 
     ResetCaptures();
     pkt.id = 0x44U;
     pkt.payload[0] = CMD_LOCAL_HELLO;
     g_local_hello_result = true;
-    AppMaster_HandleUsbPacket(&pkt);
 
+    assert(AppCommands_HandleLocalCommand(&pkt));
     assert(g_local_hello_called);
     assert(g_last_ack_id == 0x44U);
     assert(g_last_nack_id == 0U);
 
     ResetCaptures();
     pkt.id = 0x45U;
-    pkt.payload[0] = CMD_LOCAL_HELLO;
-    g_local_hello_result = false;
-    AppMaster_HandleUsbPacket(&pkt);
+    pkt.payload[0] = 0xEEU;
 
-    assert(g_local_hello_called);
-    assert(g_last_nack_id == 0x45U);
-    assert(g_last_nack_reason == 0x05U);
+    assert(!AppCommands_HandleLocalCommand(&pkt));
+    assert(g_last_ack_id == 0U);
+    assert(g_last_nack_id == 0U);
 
     return 0;
 }
