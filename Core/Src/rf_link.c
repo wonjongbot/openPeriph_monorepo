@@ -3,10 +3,33 @@
 #include "cc1101_radio.h"
 #include "openperiph_config.h"
 
-#define RF_LINK_PING_RETRIES 3U
-#define RF_LINK_PING_TIMEOUT_MS 75U
-
 extern uint32_t HAL_GetTick(void);
+
+static void RfLink_ResetStats(RfLinkExchangeStats_t *stats)
+{
+    if (stats == NULL) {
+        return;
+    }
+
+    stats->attempts_used = 0U;
+    stats->retries_used = 0U;
+    stats->elapsed_ms = 0U;
+    stats->remote_phase = 0U;
+    stats->remote_reason = 0U;
+}
+
+static void RfLink_FinalizeStats(RfLinkExchangeStats_t *stats,
+                                 uint32_t start_tick,
+                                 uint8_t attempts_used)
+{
+    if (stats == NULL) {
+        return;
+    }
+
+    stats->attempts_used = attempts_used;
+    stats->retries_used = (attempts_used > 0U) ? (uint8_t)(attempts_used - 1U) : 0U;
+    stats->elapsed_ms = (uint16_t)(HAL_GetTick() - start_tick);
+}
 
 bool RfLink_Init(void)
 {
@@ -57,7 +80,9 @@ bool RfLink_IsForLocalNode(const RfFrame_t *frame)
     return frame->dst_addr == OPENPERIPH_NODE_ADDR;
 }
 
-RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
+RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr,
+                                                 uint8_t seq,
+                                                 RfLinkExchangeStats_t *out_stats)
 {
     RfFrame_t ping_frame = {
         .version = RF_FRAME_VERSION,
@@ -67,19 +92,32 @@ RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
         .seq = seq,
         .payload_len = 0U,
     };
-    RfLinkPingResult_t result = RF_LINK_PING_RESULT_SEND_FAIL;
+    const uint32_t absolute_start = HAL_GetTick();
+    uint8_t attempts_used = 0U;
+    RfLinkPingResult_t result = RF_LINK_PING_RESULT_TIMEOUT;
 
-    for (uint8_t attempt = 0U; attempt < RF_LINK_PING_RETRIES; ++attempt) {
+    RfLink_ResetStats(out_stats);
+
+    for (uint8_t attempt = 0U; attempt < RF_LINK_MAX_RETRIES; ++attempt) {
         RfFrame_t rx_frame;
-        uint32_t start_tick;
+        uint32_t attempt_start;
+
+        if ((HAL_GetTick() - absolute_start) >= RF_LINK_PING_TOTAL_TIMEOUT_MS) {
+            break;
+        }
 
         if (!RfLink_SendFrame(&ping_frame)) {
+            RfLink_FinalizeStats(out_stats, absolute_start, attempts_used);
             return RF_LINK_PING_RESULT_SEND_FAIL;
         }
 
-        result = RF_LINK_PING_RESULT_TIMEOUT;
-        start_tick = HAL_GetTick();
-        while ((HAL_GetTick() - start_tick) < RF_LINK_PING_TIMEOUT_MS) {
+        ++attempts_used;
+        if ((HAL_GetTick() - absolute_start) >= RF_LINK_PING_TOTAL_TIMEOUT_MS) {
+            break;
+        }
+        attempt_start = HAL_GetTick();
+        while (((HAL_GetTick() - attempt_start) < RF_LINK_ATTEMPT_TIMEOUT_MS) &&
+               ((HAL_GetTick() - absolute_start) < RF_LINK_PING_TOTAL_TIMEOUT_MS)) {
             if (!RfLink_TryReceiveFrame(&rx_frame)) {
                 continue;
             }
@@ -88,10 +126,18 @@ RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
                 (rx_frame.dst_addr == OPENPERIPH_NODE_ADDR) &&
                 (rx_frame.seq == seq) &&
                 (rx_frame.payload_len == 0U)) {
+                RfLink_FinalizeStats(out_stats, absolute_start, (uint8_t)(attempt + 1U));
                 return RF_LINK_PING_RESULT_OK;
             }
         }
+
+        if ((HAL_GetTick() - absolute_start) >= RF_LINK_PING_TOTAL_TIMEOUT_MS) {
+            break;
+        }
+
+        result = RF_LINK_PING_RESULT_TIMEOUT;
     }
 
+    RfLink_FinalizeStats(out_stats, absolute_start, attempts_used);
     return result;
 }

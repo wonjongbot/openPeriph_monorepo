@@ -97,8 +97,11 @@ bool RfLink_SendFrame(const RfFrame_t *frame)
     return false;
 }
 
-RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr, uint8_t seq)
+RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr,
+                                                 uint8_t seq,
+                                                 RfLinkExchangeStats_t *out_stats)
 {
+    (void)out_stats;
     g_last_ping_dst = dst_addr;
     g_last_ping_seq = seq;
     return g_ping_result;

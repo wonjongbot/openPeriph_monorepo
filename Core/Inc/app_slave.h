@@ -35,7 +35,7 @@ static inline void AppSlave_Poll(void)
         (void)RfLink_SendFrame(&response);
         return;
     }
-    if (frame.msg_type != RF_MSG_DRAW_TEXT) {
+    if (frame.msg_type != RF_MSG_DRAW_START) {
         return;
     }
     if (!AppProtocol_DecodeDrawText(frame.payload, frame.payload_len, &cmd)) {

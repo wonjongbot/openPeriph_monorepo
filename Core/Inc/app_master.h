@@ -32,7 +32,7 @@ static inline bool AppMaster_SendDrawText(const Packet_t *pkt)
     }
 
     frame.version = RF_FRAME_VERSION;
-    frame.msg_type = RF_MSG_DRAW_TEXT;
+    frame.msg_type = RF_MSG_DRAW_START;
     frame.dst_addr = cmd.dst_addr;
     frame.src_addr = OPENPERIPH_NODE_ADDR;
     frame.seq = pkt->id;
@@ -64,7 +64,7 @@ static inline bool AppMaster_HandleRfPingCommand(const Packet_t *pkt)
         return true;
     }
 
-    result = RfLink_SendPingAndWaitForPong(dst_addr, pkt->id);
+    result = RfLink_SendPingAndWaitForPong(dst_addr, pkt->id, NULL);
     switch (result) {
     case RF_LINK_PING_RESULT_OK:
         OpenPeriph_SendUsbAck(pkt->id);

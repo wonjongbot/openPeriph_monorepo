@@ -109,7 +109,7 @@ int main(void)
     g_is_for_local_result = true;
     g_decode_draw_text_result = true;
     g_received_frame.version = RF_FRAME_VERSION;
-    g_received_frame.msg_type = RF_MSG_DRAW_TEXT;
+    g_received_frame.msg_type = RF_MSG_DRAW_START;
     g_received_frame.dst_addr = OPENPERIPH_NODE_ADDR;
     g_received_frame.src_addr = 0x22U;
     g_received_frame.seq = 0x5BU;
@@ -120,6 +120,22 @@ int main(void)
 
     assert(g_draw_text_called);
     assert(g_sent_frame.msg_type == 0U);
+
+    ResetFakes();
+    g_try_receive_result = true;
+    g_is_for_local_result = true;
+    g_decode_draw_text_result = true;
+    g_received_frame.version = RF_FRAME_VERSION;
+    g_received_frame.msg_type = RF_MSG_DRAW_START;
+    g_received_frame.dst_addr = OPENPERIPH_NODE_ADDR;
+    g_received_frame.src_addr = 0x22U;
+    g_received_frame.seq = 0x5CU;
+    g_received_frame.payload_len = 1U;
+    g_received_frame.payload[0] = 0x20U;
+
+    AppSlave_Poll();
+
+    assert(g_draw_text_called);
 
     return 0;
 }
