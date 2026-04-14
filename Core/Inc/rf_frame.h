@@ -9,9 +9,13 @@
 #define RF_FRAME_MAX_PAYLOAD 48U
 
 typedef enum {
-    RF_MSG_DRAW_TEXT = 0x01,
-    RF_MSG_PING = 0x02,
-    RF_MSG_PONG = 0x03,
+    RF_MSG_DRAW_START = 0x01,
+    RF_MSG_DRAW_CHUNK = 0x02,
+    RF_MSG_DRAW_COMMIT = 0x03,
+    RF_MSG_DRAW_ACK = 0x04,
+    RF_MSG_DRAW_ERROR = 0x05,
+    RF_MSG_PING = 0x06,
+    RF_MSG_PONG = 0x07,
     RF_MSG_ACK = 0x80,
     RF_MSG_ERROR = 0x81,
 } RfMessageType_t;
