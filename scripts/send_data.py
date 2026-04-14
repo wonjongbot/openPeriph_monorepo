@@ -356,7 +356,11 @@ def main():
             send_ping(ser)
 
         elif args.rf_ping is not None:
-            send_rf_ping(ser, args.rf_ping)
+            try:
+                send_rf_ping(ser, args.rf_ping)
+            except ValueError as exc:
+                print(f"Invalid RF ping request: {exc}")
+                sys.exit(1)
 
         elif args.status:
             send_get_status(ser)
