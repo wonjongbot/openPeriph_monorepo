@@ -49,6 +49,7 @@ APP_DRAW_FLAG_FULL_REFRESH = 0x02
 APP_TEXT_MAX_LEN = 40
 
 PKT_MAX_PAYLOAD      = 1024
+_last_rf_ping_result = None
 
 # ── CRC-16/CCITT ─────────────────────────────────────────────────
 def crc16_ccitt(data: bytes) -> int:
@@ -132,6 +133,19 @@ def read_response(ser, timeout: float = 2.0) -> dict:
 
     return result
 
+def parse_ack_telemetry(payload: bytes):
+    if len(payload) >= 4:
+        return {
+            'retries': payload[1],
+            'elapsed_ms': payload[2] | (payload[3] << 8),
+        }
+    return None
+
+def get_last_rf_ping_result():
+    if _last_rf_ping_result is None:
+        return None
+    return dict(_last_rf_ping_result)
+
 # ── High-level senders ────────────────────────────────────────────
 def send_and_wait_ack(ser, frame, label="packet"):
     ser.write(frame)
@@ -139,7 +153,11 @@ def send_and_wait_ack(ser, frame, label="packet"):
 
     resp = read_response(ser)
     if resp['valid'] and resp['type'] == PKT_TYPE_ACK:
-        print(f"  ACK received (id={resp['id']})")
+        telemetry = parse_ack_telemetry(resp['payload'])
+        if label == "DRAW_TEXT" and telemetry is not None:
+            print(f"DRAW_TEXT ok: {telemetry['retries']} retries, {telemetry['elapsed_ms']} ms")
+        else:
+            print(f"  ACK received (id={resp['id']})")
         return True
     elif resp['valid'] and resp['type'] == PKT_TYPE_NACK:
         print(f"  NACK received (reason={resp['payload'].hex()})")
@@ -226,7 +244,11 @@ def send_local_hello(ser):
     frame = build_packet(PKT_TYPE_COMMAND, payload)
     send_and_wait_ack(ser, frame, "LOCAL_HELLO")
 
-def send_rf_ping(ser, dst_addr):
+def send_rf_ping_with_details(ser, dst_addr):
+    global _last_rf_ping_result
+
+    _last_rf_ping_result = None
+
     if not 0 <= dst_addr <= 0xFF:
         raise ValueError("destination address must fit in 0..255")
 
@@ -240,10 +262,29 @@ def send_rf_ping(ser, dst_addr):
     rtt_ms = int((time.monotonic() - start) * 1000)
 
     if resp['valid'] and resp['type'] == PKT_TYPE_ACK:
+        telemetry = parse_ack_telemetry(resp['payload'])
+        if telemetry is not None:
+            elapsed_ms = telemetry['elapsed_ms']
+            retries = telemetry['retries']
+            retry_label = "retry" if retries == 1 else "retries"
+            print(f"PONG from 0x{dst_addr:02X}: {retries} {retry_label}, {elapsed_ms} ms")
+            _last_rf_ping_result = {
+                'ok': True,
+                'retries': retries,
+                'elapsed_ms': elapsed_ms,
+            }
+            return _last_rf_ping_result
+
         print(f"PONG from 0x{dst_addr:02X} (host RTT {rtt_ms} ms)")
-        return True
+        _last_rf_ping_result = {
+            'ok': True,
+            'retries': 0,
+            'elapsed_ms': rtt_ms,
+        }
+        return _last_rf_ping_result
 
     if resp['valid'] and resp['type'] == PKT_TYPE_NACK:
+        telemetry = parse_ack_telemetry(resp['payload'][1:]) if len(resp['payload']) >= 5 else None
         if len(resp['payload']) >= 2:
             reason = resp['payload'][1]
             if reason == 0x06:
@@ -254,10 +295,47 @@ def send_rf_ping(ser, dst_addr):
                 print(f"RF ping failed (reason=0x{reason:02X})")
         else:
             print("No valid RF ping response.")
-        return False
+        _last_rf_ping_result = {
+            'ok': False,
+            'retries': telemetry['retries'] if telemetry is not None else 0,
+            'elapsed_ms': telemetry['elapsed_ms'] if telemetry is not None else rtt_ms,
+        }
+        return _last_rf_ping_result
 
     print("No valid RF ping response.")
-    return False
+    _last_rf_ping_result = {
+        'ok': False,
+        'retries': 0,
+        'elapsed_ms': rtt_ms,
+    }
+    return _last_rf_ping_result
+
+def send_rf_ping(ser, dst_addr):
+    return send_rf_ping_with_details(ser, dst_addr)['ok']
+
+def send_draw_text(ser, payload: bytes):
+    frame = build_packet(PKT_TYPE_DRAW_TEXT, payload)
+    return send_and_wait_ack(ser, frame, "DRAW_TEXT")
+
+def print_rf_ping_bench_summary(results):
+    total = len(results)
+    success = sum(1 for item in results if item['ok'])
+    failed = total - success
+    retries = sum(item['retries'] for item in results)
+    failure_rate = (failed / total * 100.0) if total else 0.0
+    print(f"{total} attempts, {success} success, {failed} failed, {retries} total retries, failure rate {failure_rate:.1f}%")
+
+def run_rf_ping_bench(ser, dst_addr, count):
+    if count <= 0:
+        raise ValueError("count must be positive")
+
+    results = []
+    for attempt in range(count):
+        print(f"RF ping bench attempt {attempt + 1}/{count}")
+        results.append(send_rf_ping_with_details(ser, dst_addr))
+
+    print_rf_ping_bench_summary(results)
+    return results
 
 def encode_draw_text_payload(dst: int,
                              x: int,
@@ -303,11 +381,12 @@ def main():
                         help='Serial port (COM3 or /dev/ttyACM0)')
     parser.add_argument('--baud', type=int, default=115200,
                         help='Baud rate (default: 115200, ignored for CDC)')
-    parser.add_argument('--image', help='Path to image file to send')
-    parser.add_argument('--email',
-                        help='Email data as "subject|body|recipient"')
-    parser.add_argument('--text', help='Plain text message to send')
-    parser.add_argument('--draw-text', help='Text to draw on slave EPD')
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument('--image', help='Path to image file to send')
+    actions.add_argument('--email',
+                         help='Email data as "subject|body|recipient"')
+    actions.add_argument('--text', help='Plain text message to send')
+    actions.add_argument('--draw-text', help='Text to draw on slave EPD')
     parser.add_argument('--dst', type=lambda x: int(x, 0),
                         help='Destination slave address')
     parser.add_argument('--x', type=int, default=0,
@@ -320,14 +399,18 @@ def main():
                         help='Clear display before drawing')
     parser.add_argument('--full-refresh', action='store_true',
                         help='Request full display refresh')
-    parser.add_argument('--ping', action='store_true',
-                        help='Send a ping command')
-    parser.add_argument('--status', action='store_true',
-                        help='Request MCU status')
-    parser.add_argument('--rf-ping', type=lambda x: int(x, 0),
-                        help='Send an RF ping to the given destination address')
-    parser.add_argument('--local-hello', action='store_true',
-                        help='Render local Hello World on the connected board EPD')
+    actions.add_argument('--ping', action='store_true',
+                         help='Send a ping command')
+    actions.add_argument('--status', action='store_true',
+                         help='Request MCU status')
+    actions.add_argument('--rf-ping', type=lambda x: int(x, 0),
+                         help='Send an RF ping to the given destination address')
+    actions.add_argument('--rf-ping-bench', type=lambda x: int(x, 0),
+                         help='Run repeated RF ping diagnostics against the given destination')
+    actions.add_argument('--local-hello', action='store_true',
+                         help='Render local Hello World on the connected board EPD')
+    parser.add_argument('--count', type=int, default=20,
+                        help='Number of repeated RF diagnostic attempts')
 
     args = parser.parse_args()
 
@@ -358,6 +441,13 @@ def main():
         elif args.rf_ping is not None:
             try:
                 send_rf_ping(ser, args.rf_ping)
+            except ValueError as exc:
+                print(f"Invalid RF ping request: {exc}")
+                sys.exit(1)
+
+        elif args.rf_ping_bench is not None:
+            try:
+                run_rf_ping_bench(ser, args.rf_ping_bench, args.count)
             except ValueError as exc:
                 print(f"Invalid RF ping request: {exc}")
                 sys.exit(1)
@@ -408,11 +498,10 @@ def main():
             except ValueError as exc:
                 print(f"Invalid draw-text request: {exc}")
                 sys.exit(1)
-            frame = build_packet(PKT_TYPE_DRAW_TEXT, payload)
-            send_and_wait_ack(ser, frame, "DRAW_TEXT")
+            send_draw_text(ser, payload)
 
         else:
-            print("No action specified. Use --ping, --rf-ping, --image, --email, --text, or --draw-text")
+            print("No action specified. Use --ping, --rf-ping, --rf-ping-bench, --image, --email, --text, or --draw-text")
 
     finally:
         ser.close()
