@@ -191,7 +191,7 @@ bool DisplayService_Init(void)
     Paint_NewImage(DisplayService_MonoBuffer(),
                    kPanelInfo.width_px,
                    kPanelInfo.height_px,
-                   ROTATE_90,
+                   ROTATE_0,
                    WHITE);
     Paint_SelectImage(DisplayService_MonoBuffer());
     Paint_Clear(WHITE);
