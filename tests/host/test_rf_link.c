@@ -9,6 +9,7 @@
 
 static bool g_send_result;
 static uint32_t g_send_calls;
+static uint32_t g_recover_rx_calls;
 static uint32_t g_tick;
 static uint32_t g_send_tick_advance;
 static uint8_t g_last_tx[64];
@@ -39,6 +40,12 @@ bool Cc1101Radio_Send(const uint8_t *payload, uint8_t length)
         memcpy(g_last_tx, payload, length);
     }
     return g_send_result;
+}
+
+bool Cc1101Radio_RecoverRx(void)
+{
+    ++g_recover_rx_calls;
+    return true;
 }
 
 bool Cc1101Radio_Receive(uint8_t *payload, uint8_t *in_out_length)
@@ -74,6 +81,7 @@ static void ResetFakes(void)
 {
     g_send_result = true;
     g_send_calls = 0U;
+    g_recover_rx_calls = 0U;
     g_tick = 0U;
     g_send_tick_advance = 0U;
     g_last_tx_len = 0U;
@@ -197,6 +205,7 @@ int main(void)
     result = RfLink_SendPingAndWaitForPong(0x22U, 0x33U, &stats);
     assert(result == RF_LINK_PING_RESULT_OK);
     assert(g_send_calls == 2U);
+    assert(g_recover_rx_calls == 1U);
     assert(g_rx_script_index == 2U);
     assert(g_last_tx_len == 6U);
     assert(stats.attempts_used == 2U);
@@ -211,6 +220,7 @@ int main(void)
     result = RfLink_SendPingAndWaitForPong(0x22U, 0x33U, &stats);
     assert(result == RF_LINK_PING_RESULT_OK);
     assert(g_send_calls == 2U);
+    assert(g_recover_rx_calls == 1U);
     assert(g_rx_script_index == 2U);
     assert(stats.attempts_used == 2U);
     assert(stats.retries_used == 1U);
@@ -225,6 +235,7 @@ int main(void)
     result = RfLink_SendPingAndWaitForPong(0x22U, 0x33U, &stats);
     assert(result == RF_LINK_PING_RESULT_OK);
     assert(g_send_calls == 2U);
+    assert(g_recover_rx_calls == 1U);
     assert(g_rx_script_index == 2U);
     assert(stats.attempts_used == 2U);
     assert(stats.retries_used == 1U);
@@ -236,6 +247,7 @@ int main(void)
     result = RfLink_SendPingAndWaitForPong(0x22U, 0x33U, &stats);
     assert(result == RF_LINK_PING_RESULT_TIMEOUT);
     assert(g_send_calls == 1U);
+    assert(g_recover_rx_calls == 1U);
     assert(g_rx_script_index == 0U);
     assert(stats.attempts_used == 1U);
     assert(stats.retries_used == 0U);

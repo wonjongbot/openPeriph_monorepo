@@ -107,12 +107,14 @@ RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr,
         }
 
         if (!RfLink_SendFrame(&ping_frame)) {
+            (void)Cc1101Radio_RecoverRx();
             RfLink_FinalizeStats(out_stats, absolute_start, attempts_used);
             return RF_LINK_PING_RESULT_SEND_FAIL;
         }
 
         ++attempts_used;
         if ((HAL_GetTick() - absolute_start) >= RF_LINK_PING_TOTAL_TIMEOUT_MS) {
+            (void)Cc1101Radio_RecoverRx();
             break;
         }
         attempt_start = HAL_GetTick();
@@ -132,9 +134,11 @@ RfLinkPingResult_t RfLink_SendPingAndWaitForPong(uint8_t dst_addr,
         }
 
         if ((HAL_GetTick() - absolute_start) >= RF_LINK_PING_TOTAL_TIMEOUT_MS) {
+            (void)Cc1101Radio_RecoverRx();
             break;
         }
 
+        (void)Cc1101Radio_RecoverRx();
         result = RF_LINK_PING_RESULT_TIMEOUT;
     }
 

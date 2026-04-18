@@ -26,6 +26,7 @@ typedef struct {
 const DisplayServicePanelInfo_t *DisplayService_GetPanelInfo(void);
 bool DisplayService_Init(void);
 bool DisplayService_Clear(bool full_refresh);
+bool DisplayService_ClearBuffer(void);
 bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd);
 bool DisplayService_RenderText(uint16_t x,
                                uint16_t y,
@@ -33,6 +34,7 @@ bool DisplayService_RenderText(uint16_t x,
                                const char *text,
                                bool clear_first,
                                bool full_refresh);
+bool DisplayService_Flush(bool full_refresh);
 void DisplayService_Sleep(void);
 
 #endif

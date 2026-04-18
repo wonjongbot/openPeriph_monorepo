@@ -9,18 +9,16 @@
 #include <string.h>
 
 typedef struct {
-    bool active;
-    uint16_t x;
-    uint16_t y;
-    uint8_t font_id;
-    uint8_t flags;
-    uint8_t total_text_len;
-    uint8_t staged_len;
-    uint8_t next_chunk_index;
-    uint8_t last_chunk_index;
-    uint8_t last_chunk_len;
-    bool has_last_chunk;
-    uint8_t text[APP_TEXT_MAX_LEN];
+    bool has_session;
+    bool accepting_text;
+    bool committed;
+    bool flushed;
+    uint8_t session_id;
+    uint8_t begin_flags;
+    uint8_t next_op_index;
+    uint8_t last_op_index;
+    bool has_last_text;
+    AppDrawTextCommand_t last_text;
 } AppSlaveDrawState_t;
 
 static AppSlaveDrawState_t g_app_slave_draw_state;
@@ -64,113 +62,161 @@ static inline void AppSlave_SendDrawError(const RfFrame_t *frame, uint8_t phase,
     (void)RfLink_SendFrame(&response);
 }
 
-static inline void AppSlave_HandleDrawStart(const RfFrame_t *frame)
+static inline bool AppSlave_IsDuplicateText(const RfDrawText_t *text)
 {
-    RfDrawStart_t start;
-
-    AppSlave_ClearDrawState();
-
-    if (!RfDrawProtocol_DecodeStart(frame->payload, frame->payload_len, &start)) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_START, RF_DRAW_ERROR_REASON_LENGTH);
-        return;
-    }
-    if ((start.total_text_len == 0U) || (start.total_text_len > APP_TEXT_MAX_LEN)) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_START, RF_DRAW_ERROR_REASON_LENGTH);
-        return;
+    if ((text == NULL) || !g_app_slave_draw_state.has_last_text) {
+        return false;
     }
 
-    g_app_slave_draw_state.active = true;
-    g_app_slave_draw_state.x = start.x;
-    g_app_slave_draw_state.y = start.y;
-    g_app_slave_draw_state.font_id = start.font_id;
-    g_app_slave_draw_state.flags = start.flags;
-    g_app_slave_draw_state.total_text_len = start.total_text_len;
-    AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_START, 0U);
+    return (g_app_slave_draw_state.last_op_index == text->op_index) &&
+           (g_app_slave_draw_state.last_text.session_id == text->session_id) &&
+           (g_app_slave_draw_state.last_text.op_index == text->op_index) &&
+           (g_app_slave_draw_state.last_text.x == text->x) &&
+           (g_app_slave_draw_state.last_text.y == text->y) &&
+           (g_app_slave_draw_state.last_text.font_id == text->font_id) &&
+           (g_app_slave_draw_state.last_text.text_len == text->text_len) &&
+           ((text->text_len == 0U) ||
+            (memcmp(g_app_slave_draw_state.last_text.text, text->text, text->text_len) == 0));
 }
 
-static inline void AppSlave_HandleDrawChunk(const RfFrame_t *frame)
+static inline void AppSlave_HandleDrawBegin(const RfFrame_t *frame)
 {
-    RfDrawChunk_t chunk;
-    size_t last_chunk_offset;
+    RfDrawBegin_t begin;
 
-    if (!g_app_slave_draw_state.active) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_CHUNK, RF_DRAW_ERROR_REASON_BAD_STATE);
+    if (!RfDrawProtocol_DecodeBegin(frame->payload, frame->payload_len, &begin)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_BEGIN, RF_DRAW_ERROR_REASON_LENGTH);
         return;
     }
-    if (!RfDrawProtocol_DecodeChunk(frame->payload, frame->payload_len, &chunk)) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_CHUNK, RF_DRAW_ERROR_REASON_BAD_CHUNK);
-        return;
-    }
-    if (g_app_slave_draw_state.has_last_chunk &&
-        (chunk.chunk_index == g_app_slave_draw_state.last_chunk_index)) {
-        last_chunk_offset =
-            (size_t)g_app_slave_draw_state.staged_len - (size_t)g_app_slave_draw_state.last_chunk_len;
-        if ((chunk.chunk_len != g_app_slave_draw_state.last_chunk_len) ||
-            ((chunk.chunk_len > 0U) &&
-             (memcmp(&g_app_slave_draw_state.text[last_chunk_offset], chunk.data, chunk.chunk_len) != 0))) {
-            AppSlave_SendDrawError(frame, RF_DRAW_PHASE_CHUNK, RF_DRAW_ERROR_REASON_BAD_CHUNK);
+
+    if (g_app_slave_draw_state.has_session &&
+        (g_app_slave_draw_state.session_id == begin.session_id)) {
+        if (g_app_slave_draw_state.begin_flags != begin.flags) {
+            AppSlave_SendDrawError(frame, RF_DRAW_PHASE_BEGIN, RF_DRAW_ERROR_REASON_BAD_STATE);
             return;
         }
-        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_CHUNK, chunk.chunk_index);
-        return;
-    }
-    if (chunk.chunk_index != g_app_slave_draw_state.next_chunk_index) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_CHUNK, RF_DRAW_ERROR_REASON_BAD_CHUNK);
-        return;
-    }
-    if ((size_t)g_app_slave_draw_state.staged_len + (size_t)chunk.chunk_len >
-        (size_t)g_app_slave_draw_state.total_text_len) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_CHUNK, RF_DRAW_ERROR_REASON_LENGTH);
+        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_BEGIN, 0U);
         return;
     }
 
-    if (chunk.chunk_len > 0U) {
-        memcpy(&g_app_slave_draw_state.text[g_app_slave_draw_state.staged_len],
-               chunk.data,
-               chunk.chunk_len);
+    AppSlave_ClearDrawState();
+    if ((begin.flags & APP_DRAW_FLAG_CLEAR_FIRST) != 0U) {
+        if (!DisplayService_ClearBuffer()) {
+            AppSlave_SendDrawError(frame, RF_DRAW_PHASE_BEGIN, RF_DRAW_ERROR_REASON_RENDER);
+            return;
+        }
     }
-    g_app_slave_draw_state.staged_len =
-        (uint8_t)(g_app_slave_draw_state.staged_len + chunk.chunk_len);
-    g_app_slave_draw_state.last_chunk_index = chunk.chunk_index;
-    g_app_slave_draw_state.last_chunk_len = chunk.chunk_len;
-    g_app_slave_draw_state.has_last_chunk = true;
-    g_app_slave_draw_state.next_chunk_index = (uint8_t)(chunk.chunk_index + 1U);
-    AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_CHUNK, chunk.chunk_index);
+
+    g_app_slave_draw_state.has_session = true;
+    g_app_slave_draw_state.accepting_text = true;
+    g_app_slave_draw_state.session_id = begin.session_id;
+    g_app_slave_draw_state.begin_flags = begin.flags;
+    AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_BEGIN, 0U);
 }
 
-static inline void AppSlave_HandleDrawCommit(const RfFrame_t *frame)
+static inline void AppSlave_HandleDrawText(const RfFrame_t *frame)
 {
     AppDrawTextCommand_t cmd = {0};
-    bool draw_ok;
+    RfDrawText_t text;
 
-    if (!g_app_slave_draw_state.active) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_COMMIT, RF_DRAW_ERROR_REASON_BAD_STATE);
-        AppSlave_ClearDrawState();
+    if (!g_app_slave_draw_state.has_session ||
+        !g_app_slave_draw_state.accepting_text ||
+        g_app_slave_draw_state.committed) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TEXT, RF_DRAW_ERROR_REASON_BAD_STATE);
         return;
     }
-    if (g_app_slave_draw_state.staged_len != g_app_slave_draw_state.total_text_len) {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_COMMIT, RF_DRAW_ERROR_REASON_LENGTH);
-        AppSlave_ClearDrawState();
+    if (!RfDrawProtocol_DecodeText(frame->payload, frame->payload_len, &text)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TEXT, RF_DRAW_ERROR_REASON_LENGTH);
+        return;
+    }
+    if (text.session_id != g_app_slave_draw_state.session_id) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TEXT, RF_DRAW_ERROR_REASON_BAD_STATE);
+        return;
+    }
+    if (AppSlave_IsDuplicateText(&text)) {
+        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_TEXT, text.op_index);
+        return;
+    }
+    if (text.op_index != g_app_slave_draw_state.next_op_index) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TEXT, RF_DRAW_ERROR_REASON_BAD_CHUNK);
         return;
     }
 
     cmd.dst_addr = OPENPERIPH_NODE_ADDR;
-    cmd.x = g_app_slave_draw_state.x;
-    cmd.y = g_app_slave_draw_state.y;
-    cmd.font_id = g_app_slave_draw_state.font_id;
-    cmd.flags = g_app_slave_draw_state.flags;
-    cmd.text_len = g_app_slave_draw_state.total_text_len;
+    cmd.session_id = text.session_id;
+    cmd.op_index = text.op_index;
+    cmd.x = text.x;
+    cmd.y = text.y;
+    cmd.font_id = text.font_id;
+    cmd.text_len = text.text_len;
     if (cmd.text_len > 0U) {
-        memcpy(cmd.text, g_app_slave_draw_state.text, cmd.text_len);
+        memcpy(cmd.text, text.text, cmd.text_len);
     }
 
-    draw_ok = DisplayService_DrawText(&cmd);
-    if (draw_ok) {
-        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_COMMIT, 0U);
-    } else {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_COMMIT, RF_DRAW_ERROR_REASON_RENDER);
+    if (!DisplayService_DrawText(&cmd)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TEXT, RF_DRAW_ERROR_REASON_RENDER);
+        return;
     }
-    AppSlave_ClearDrawState();
+
+    g_app_slave_draw_state.last_text = cmd;
+    g_app_slave_draw_state.has_last_text = true;
+    g_app_slave_draw_state.last_op_index = text.op_index;
+    g_app_slave_draw_state.next_op_index = (uint8_t)(text.op_index + 1U);
+    AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_TEXT, text.op_index);
+}
+
+static inline void AppSlave_HandleDisplayFlush(const RfFrame_t *frame)
+{
+    uint8_t session_id;
+    bool full_refresh;
+
+    if (frame->payload_len != 2U) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_FLUSH, RF_DRAW_ERROR_REASON_LENGTH);
+        return;
+    }
+
+    session_id = frame->payload[0];
+    full_refresh = (frame->payload[1] != 0U);
+    if (!g_app_slave_draw_state.has_session ||
+        (session_id != g_app_slave_draw_state.session_id) ||
+        !g_app_slave_draw_state.committed) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_FLUSH, RF_DRAW_ERROR_REASON_BAD_STATE);
+        return;
+    }
+    if (g_app_slave_draw_state.flushed) {
+        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_FLUSH, 0U);
+        return;
+    }
+
+    if (DisplayService_Flush(full_refresh)) {
+        g_app_slave_draw_state.flushed = true;
+        g_app_slave_draw_state.accepting_text = false;
+        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_FLUSH, 0U);
+    } else {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_FLUSH, RF_DRAW_ERROR_REASON_RENDER);
+    }
+}
+
+static inline void AppSlave_HandleDrawCommit(const RfFrame_t *frame)
+{
+    RfDrawCommit_t commit;
+
+    if (!RfDrawProtocol_DecodeCommit(frame->payload, frame->payload_len, &commit)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_COMMIT, RF_DRAW_ERROR_REASON_LENGTH);
+        return;
+    }
+    if (!g_app_slave_draw_state.has_session ||
+        (commit.session_id != g_app_slave_draw_state.session_id)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_COMMIT, RF_DRAW_ERROR_REASON_BAD_STATE);
+        return;
+    }
+    if (g_app_slave_draw_state.committed) {
+        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_COMMIT, 0U);
+        return;
+    }
+
+    g_app_slave_draw_state.committed = true;
+    g_app_slave_draw_state.accepting_text = false;
+    AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_COMMIT, 0U);
 }
 
 static inline void AppSlave_Init(void)
@@ -205,16 +251,20 @@ static inline void AppSlave_Poll(void)
     }
 
     switch (frame.msg_type) {
-    case RF_MSG_DRAW_START:
-        AppSlave_HandleDrawStart(&frame);
+    case RF_MSG_DRAW_BEGIN:
+        AppSlave_HandleDrawBegin(&frame);
         break;
 
-    case RF_MSG_DRAW_CHUNK:
-        AppSlave_HandleDrawChunk(&frame);
+    case RF_MSG_DRAW_TEXT:
+        AppSlave_HandleDrawText(&frame);
         break;
 
     case RF_MSG_DRAW_COMMIT:
         AppSlave_HandleDrawCommit(&frame);
+        break;
+
+    case RF_MSG_DISPLAY_FLUSH:
+        AppSlave_HandleDisplayFlush(&frame);
         break;
 
     case RF_MSG_PING:

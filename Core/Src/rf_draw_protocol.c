@@ -13,73 +13,95 @@ static uint16_t RfDrawProtocol_ReadU16LE(const uint8_t *buf)
     return (uint16_t)buf[0] | ((uint16_t)buf[1] << 8);
 }
 
-size_t RfDrawProtocol_EncodeStart(const RfDrawStart_t *start, uint8_t *out_buf, size_t out_capacity)
+size_t RfDrawProtocol_EncodeBegin(const RfDrawBegin_t *begin, uint8_t *out_buf, size_t out_capacity)
 {
-    if ((start == NULL) || (out_buf == NULL) || (out_capacity < RF_DRAW_START_PAYLOAD_LEN)) {
+    if ((begin == NULL) || (out_buf == NULL) || (out_capacity < RF_DRAW_BEGIN_PAYLOAD_LEN)) {
         return 0U;
     }
 
-    RfDrawProtocol_WriteU16LE(&out_buf[0], start->x);
-    RfDrawProtocol_WriteU16LE(&out_buf[2], start->y);
-    out_buf[4] = start->font_id;
-    out_buf[5] = start->flags;
-    out_buf[6] = start->total_text_len;
-    return RF_DRAW_START_PAYLOAD_LEN;
+    out_buf[0] = begin->session_id;
+    out_buf[1] = begin->flags;
+    return RF_DRAW_BEGIN_PAYLOAD_LEN;
 }
 
-bool RfDrawProtocol_DecodeStart(const uint8_t *buf, size_t len, RfDrawStart_t *out_start)
+bool RfDrawProtocol_DecodeBegin(const uint8_t *buf, size_t len, RfDrawBegin_t *out_begin)
 {
-    if ((buf == NULL) || (out_start == NULL) || (len != RF_DRAW_START_PAYLOAD_LEN)) {
+    if ((buf == NULL) || (out_begin == NULL) || (len != RF_DRAW_BEGIN_PAYLOAD_LEN)) {
         return false;
     }
 
-    out_start->x = RfDrawProtocol_ReadU16LE(&buf[0]);
-    out_start->y = RfDrawProtocol_ReadU16LE(&buf[2]);
-    out_start->font_id = buf[4];
-    out_start->flags = buf[5];
-    out_start->total_text_len = buf[6];
+    out_begin->session_id = buf[0];
+    out_begin->flags = buf[1];
     return true;
 }
 
-size_t RfDrawProtocol_EncodeChunk(const RfDrawChunk_t *chunk, uint8_t *out_buf, size_t out_capacity)
+size_t RfDrawProtocol_EncodeText(const RfDrawText_t *text, uint8_t *out_buf, size_t out_capacity)
 {
     size_t total_len;
 
-    if ((chunk == NULL) || (out_buf == NULL) || (chunk->chunk_len > RF_DRAW_CHUNK_MAX_DATA)) {
+    if ((text == NULL) || (out_buf == NULL) || (text->text_len > RF_DRAW_TEXT_MAX_LEN)) {
         return 0U;
     }
 
-    total_len = RF_DRAW_CHUNK_HEADER_LEN + (size_t)chunk->chunk_len;
+    total_len = RF_DRAW_TEXT_FIXED_LEN + (size_t)text->text_len;
     if (out_capacity < total_len) {
         return 0U;
     }
 
-    out_buf[0] = chunk->chunk_index;
-    out_buf[1] = chunk->chunk_len;
-    if (chunk->chunk_len > 0U) {
-        memcpy(&out_buf[2], chunk->data, chunk->chunk_len);
+    out_buf[0] = text->session_id;
+    out_buf[1] = text->op_index;
+    RfDrawProtocol_WriteU16LE(&out_buf[2], text->x);
+    RfDrawProtocol_WriteU16LE(&out_buf[4], text->y);
+    out_buf[6] = text->font_id;
+    out_buf[7] = text->text_len;
+    if (text->text_len > 0U) {
+        memcpy(&out_buf[RF_DRAW_TEXT_FIXED_LEN], text->text, text->text_len);
     }
     return total_len;
 }
 
-bool RfDrawProtocol_DecodeChunk(const uint8_t *buf, size_t len, RfDrawChunk_t *out_chunk)
+bool RfDrawProtocol_DecodeText(const uint8_t *buf, size_t len, RfDrawText_t *out_text)
 {
     size_t expected_len;
 
-    if ((buf == NULL) || (out_chunk == NULL) || (len < RF_DRAW_CHUNK_HEADER_LEN)) {
+    if ((buf == NULL) || (out_text == NULL) || (len < RF_DRAW_TEXT_FIXED_LEN)) {
         return false;
     }
 
-    expected_len = RF_DRAW_CHUNK_HEADER_LEN + (size_t)buf[1];
-    if ((buf[1] > RF_DRAW_CHUNK_MAX_DATA) || (len != expected_len)) {
+    expected_len = RF_DRAW_TEXT_FIXED_LEN + (size_t)buf[7];
+    if ((buf[7] > RF_DRAW_TEXT_MAX_LEN) || (len != expected_len)) {
         return false;
     }
 
-    out_chunk->chunk_index = buf[0];
-    out_chunk->chunk_len = buf[1];
-    if (out_chunk->chunk_len > 0U) {
-        memcpy(out_chunk->data, &buf[2], out_chunk->chunk_len);
+    out_text->session_id = buf[0];
+    out_text->op_index = buf[1];
+    out_text->x = RfDrawProtocol_ReadU16LE(&buf[2]);
+    out_text->y = RfDrawProtocol_ReadU16LE(&buf[4]);
+    out_text->font_id = buf[6];
+    out_text->text_len = buf[7];
+    if (out_text->text_len > 0U) {
+        memcpy(out_text->text, &buf[RF_DRAW_TEXT_FIXED_LEN], out_text->text_len);
     }
+    return true;
+}
+
+size_t RfDrawProtocol_EncodeCommit(const RfDrawCommit_t *commit, uint8_t *out_buf, size_t out_capacity)
+{
+    if ((commit == NULL) || (out_buf == NULL) || (out_capacity < RF_DRAW_COMMIT_PAYLOAD_LEN)) {
+        return 0U;
+    }
+
+    out_buf[0] = commit->session_id;
+    return RF_DRAW_COMMIT_PAYLOAD_LEN;
+}
+
+bool RfDrawProtocol_DecodeCommit(const uint8_t *buf, size_t len, RfDrawCommit_t *out_commit)
+{
+    if ((buf == NULL) || (out_commit == NULL) || (len != RF_DRAW_COMMIT_PAYLOAD_LEN)) {
+        return false;
+    }
+
+    out_commit->session_id = buf[0];
     return true;
 }
 

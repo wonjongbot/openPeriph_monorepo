@@ -23,13 +23,16 @@ import os
 import time
 
 # ── Packet types ──────────────────────────────────────────────────
-PKT_TYPE_IMAGE_DATA  = 0x01
-PKT_TYPE_EMAIL_DATA  = 0x02
-PKT_TYPE_TEXT_DATA   = 0x03
-PKT_TYPE_FILE_START  = 0x04
-PKT_TYPE_FILE_END    = 0x05
-PKT_TYPE_COMMAND     = 0x10
-PKT_TYPE_DRAW_TEXT   = 0x11
+PKT_TYPE_IMAGE_DATA     = 0x01
+PKT_TYPE_EMAIL_DATA     = 0x02
+PKT_TYPE_TEXT_DATA      = 0x03
+PKT_TYPE_FILE_START     = 0x04
+PKT_TYPE_FILE_END       = 0x05
+PKT_TYPE_COMMAND        = 0x10
+PKT_TYPE_DRAW_TEXT      = 0x11
+PKT_TYPE_DRAW_BEGIN     = 0x12
+PKT_TYPE_DRAW_COMMIT    = 0x13
+PKT_TYPE_DISPLAY_FLUSH  = 0x14
 
 PKT_TYPE_ACK         = 0x80
 PKT_TYPE_NACK        = 0x81
@@ -44,12 +47,13 @@ APP_FONT_12 = 0x01
 APP_FONT_16 = 0x02
 
 APP_DRAW_FLAG_CLEAR_FIRST = 0x01
-APP_DRAW_FLAG_FULL_REFRESH = 0x02
 
 APP_TEXT_MAX_LEN = 40
+RF_DRAW_TEXT_MAX_LEN = 24
 
 PKT_MAX_PAYLOAD      = 1024
 _last_rf_ping_result = None
+_draw_session_counter = 0
 
 # ── CRC-16/CCITT ─────────────────────────────────────────────────
 def crc16_ccitt(data: bytes) -> int:
@@ -313,9 +317,43 @@ def send_rf_ping_with_details(ser, dst_addr):
 def send_rf_ping(ser, dst_addr):
     return send_rf_ping_with_details(ser, dst_addr)['ok']
 
+def send_draw_begin(ser, payload: bytes):
+    frame = build_packet(PKT_TYPE_DRAW_BEGIN, payload)
+    return send_and_wait_ack(ser, frame, "DRAW_BEGIN")
+
 def send_draw_text(ser, payload: bytes):
     frame = build_packet(PKT_TYPE_DRAW_TEXT, payload)
     return send_and_wait_ack(ser, frame, "DRAW_TEXT")
+
+def send_draw_commit(ser, payload: bytes):
+    frame = build_packet(PKT_TYPE_DRAW_COMMIT, payload)
+    return send_and_wait_ack(ser, frame, "DRAW_COMMIT")
+
+def encode_draw_begin_payload(dst: int, session_id: int, clear_first: bool) -> bytes:
+    if not 0 <= dst <= 0xFF:
+        raise ValueError("destination address must fit in 0..255")
+    if not 0 <= session_id <= 0xFF:
+        raise ValueError("session id must fit in 0..255")
+    flags = APP_DRAW_FLAG_CLEAR_FIRST if clear_first else 0
+    return bytes([dst, session_id, flags])
+
+def encode_draw_commit_payload(dst: int, session_id: int) -> bytes:
+    if not 0 <= dst <= 0xFF:
+        raise ValueError("destination address must fit in 0..255")
+    if not 0 <= session_id <= 0xFF:
+        raise ValueError("session id must fit in 0..255")
+    return bytes([dst, session_id])
+
+def encode_flush_payload(dst: int, session_id: int, full_refresh: bool) -> bytes:
+    if not 0 <= dst <= 0xFF:
+        raise ValueError("destination address must fit in 0..255")
+    if not 0 <= session_id <= 0xFF:
+        raise ValueError("session id must fit in 0..255")
+    return bytes([dst, session_id, 1 if full_refresh else 0])
+
+def send_display_flush(ser, payload: bytes):
+    frame = build_packet(PKT_TYPE_DISPLAY_FLUSH, payload)
+    return send_and_wait_ack(ser, frame, "DISPLAY_FLUSH")
 
 def print_rf_ping_bench_summary(results):
     total = len(results)
@@ -338,14 +376,18 @@ def run_rf_ping_bench(ser, dst_addr, count):
     return results
 
 def encode_draw_text_payload(dst: int,
+                             session_id: int,
+                             op_index: int,
                              x: int,
                              y: int,
                              font: str,
-                             clear_first: bool,
-                             full_refresh: bool,
                              text: str) -> bytes:
     if not 0 <= dst <= 0xFF:
         raise ValueError("destination address must fit in 0..255")
+    if not 0 <= session_id <= 0xFF:
+        raise ValueError("session id must fit in 0..255")
+    if not 0 <= op_index <= 0xFF:
+        raise ValueError("op index must fit in 0..255")
     if not 0 <= x <= 0xFFFF:
         raise ValueError("x must fit in 0..65535")
     if not 0 <= y <= 0xFFFF:
@@ -356,21 +398,46 @@ def encode_draw_text_payload(dst: int,
     except UnicodeEncodeError as exc:
         raise ValueError("draw text currently supports ASCII only") from exc
 
-    if len(text_bytes) > APP_TEXT_MAX_LEN:
-        raise ValueError(f"draw text payload exceeds {APP_TEXT_MAX_LEN} ASCII bytes")
+    if len(text_bytes) > RF_DRAW_TEXT_MAX_LEN:
+        raise ValueError(f"draw text payload exceeds {RF_DRAW_TEXT_MAX_LEN} ASCII bytes")
 
     font_id = APP_FONT_12 if font == '12' else APP_FONT_16
-    flags = 0
-    if clear_first:
-        flags |= APP_DRAW_FLAG_CLEAR_FIRST
-    if full_refresh:
-        flags |= APP_DRAW_FLAG_FULL_REFRESH
 
     return (
         bytes([dst])
-        + struct.pack('<HHBB', x, y, font_id, flags)
+        + bytes([session_id, op_index])
+        + struct.pack('<HHB', x, y, font_id)
         + bytes([len(text_bytes)])
         + text_bytes
+    )
+
+def next_draw_session_id() -> int:
+    global _draw_session_counter
+
+    _draw_session_counter = (_draw_session_counter + 1) & 0xFF
+    if _draw_session_counter == 0:
+        _draw_session_counter = 1
+    return _draw_session_counter
+
+def send_single_draw_text(ser,
+                          dst: int,
+                          x: int,
+                          y: int,
+                          font: str,
+                          text: str,
+                          clear_first: bool = False,
+                          full_refresh: bool = True) -> bool:
+    session_id = next_draw_session_id()
+    begin_payload = encode_draw_begin_payload(dst, session_id, clear_first)
+    text_payload = encode_draw_text_payload(dst, session_id, 0, x, y, font, text)
+    commit_payload = encode_draw_commit_payload(dst, session_id)
+    flush_payload = encode_flush_payload(dst, session_id, full_refresh)
+
+    return (
+        send_draw_begin(ser, begin_payload)
+        and send_draw_text(ser, text_payload)
+        and send_draw_commit(ser, commit_payload)
+        and send_display_flush(ser, flush_payload)
     )
 
 # ── CLI ──────────────────────────────────────────────────────────
@@ -387,6 +454,10 @@ def main():
                          help='Email data as "subject|body|recipient"')
     actions.add_argument('--text', help='Plain text message to send')
     actions.add_argument('--draw-text', help='Text to draw on slave EPD')
+    actions.add_argument('--flush', action='store_true',
+                         help='Flush staged framebuffer to EPD (requires --dst)')
+    parser.add_argument('--session', type=lambda x: int(x, 0),
+                        help='Draw session id for low-level staged commands')
     parser.add_argument('--dst', type=lambda x: int(x, 0),
                         help='Destination slave address')
     parser.add_argument('--x', type=int, default=0,
@@ -486,22 +557,35 @@ def main():
                 sys.exit(1)
 
             try:
-                payload = encode_draw_text_payload(
+                ok = send_single_draw_text(
+                    ser,
                     args.dst,
                     args.x,
                     args.y,
                     args.font,
-                    args.clear_first,
-                    args.full_refresh,
                     args.draw_text,
+                    clear_first=args.clear_first,
+                    full_refresh=args.full_refresh,
                 )
             except ValueError as exc:
                 print(f"Invalid draw-text request: {exc}")
                 sys.exit(1)
-            send_draw_text(ser, payload)
+            if not ok:
+                sys.exit(1)
+
+        elif args.flush:
+            if args.dst is None or args.session is None:
+                print("--dst and --session are required with --flush")
+                sys.exit(1)
+            try:
+                payload = encode_flush_payload(args.dst, args.session, args.full_refresh)
+            except ValueError as exc:
+                print(f"Invalid flush request: {exc}")
+                sys.exit(1)
+            send_display_flush(ser, payload)
 
         else:
-            print("No action specified. Use --ping, --rf-ping, --rf-ping-bench, --image, --email, --text, or --draw-text")
+            print("No action specified. Use --ping, --rf-ping, --rf-ping-bench, --image, --email, --text, --draw-text, or --flush")
 
     finally:
         ser.close()

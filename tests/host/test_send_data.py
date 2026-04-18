@@ -172,7 +172,7 @@ class SendDataTests(unittest.TestCase):
         )
         ser = FakeSerial(response)
         out = io.StringIO()
-        payload = send_data.encode_draw_text_payload(0x22, 0, 0, '16', False, False, 'HELLO')
+        payload = send_data.encode_draw_text_payload(0x22, 0x31, 0x07, 0, 0, '16', 'HELLO')
 
         with contextlib.redirect_stdout(out):
             send_data.send_draw_text(ser, payload)
@@ -180,6 +180,25 @@ class SendDataTests(unittest.TestCase):
         self.assertIn('DRAW_TEXT ok', out.getvalue())
         self.assertIn('2 retries', out.getvalue())
         self.assertIn('184 ms', out.getvalue())
+
+    def test_encode_draw_begin_payload(self):
+        payload = send_data.encode_draw_begin_payload(0x22, 0x31, True)
+
+        self.assertEqual(payload, bytes([0x22, 0x31, send_data.APP_DRAW_FLAG_CLEAR_FIRST]))
+
+    def test_encode_draw_text_payload_includes_session_and_op_index(self):
+        payload = send_data.encode_draw_text_payload(0x22, 0x31, 0x07, 10, 20, '16', 'HELLO')
+
+        self.assertEqual(payload[:3], bytes([0x22, 0x31, 0x07]))
+        self.assertEqual(payload[3:5], bytes([10, 0]))
+        self.assertEqual(payload[5:7], bytes([20, 0]))
+        self.assertEqual(payload[7], send_data.APP_FONT_16)
+        self.assertEqual(payload[8], 5)
+        self.assertEqual(payload[9:], b'HELLO')
+
+    def test_encode_draw_commit_and_flush_payloads(self):
+        self.assertEqual(send_data.encode_draw_commit_payload(0x22, 0x31), bytes([0x22, 0x31]))
+        self.assertEqual(send_data.encode_flush_payload(0x22, 0x31, True), bytes([0x22, 0x31, 1]))
 
     def test_rf_ping_rejects_out_of_range_destination(self):
         ser = FakeSerial(b'')

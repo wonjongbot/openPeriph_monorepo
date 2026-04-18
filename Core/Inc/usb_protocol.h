@@ -50,7 +50,10 @@ typedef enum {
     PKT_TYPE_FILE_START     = 0x04,  /* Start of a multi-packet file transfer */
     PKT_TYPE_FILE_END       = 0x05,  /* End of multi-packet file transfer */
     PKT_TYPE_COMMAND        = 0x10,  /* Generic command to MCU */
-    PKT_TYPE_DRAW_TEXT      = 0x11,  /* Draw-text application payload */
+    PKT_TYPE_DRAW_TEXT      = 0x11,  /* Draw-text operation payload */
+    PKT_TYPE_DRAW_BEGIN     = 0x12,  /* Begin staged draw session */
+    PKT_TYPE_DRAW_COMMIT    = 0x13,  /* Commit staged draw session */
+    PKT_TYPE_DISPLAY_FLUSH  = 0x14,  /* Flush committed staged framebuffer to EPD */
 
     /* MCU -> PC */
     PKT_TYPE_ACK            = 0x80,  /* Acknowledge receipt */

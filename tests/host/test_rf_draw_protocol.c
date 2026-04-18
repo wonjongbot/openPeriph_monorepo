@@ -8,66 +8,83 @@ int main(void)
     uint8_t buf[RF_FRAME_MAX_PAYLOAD];
     size_t used;
 
-    RfDrawStart_t start = {
+    RfDrawBegin_t begin = {
+        .session_id = 0x31U,
+        .flags = APP_DRAW_FLAG_CLEAR_FIRST,
+    };
+    RfDrawBegin_t decoded_begin;
+
+    assert(RfDrawProtocol_EncodeBegin(&begin, buf, RF_DRAW_BEGIN_PAYLOAD_LEN - 1U) == 0U);
+    used = RfDrawProtocol_EncodeBegin(&begin, buf, sizeof(buf));
+    assert(used == RF_DRAW_BEGIN_PAYLOAD_LEN);
+    assert(RfDrawProtocol_DecodeBegin(buf, used, &decoded_begin));
+    assert(decoded_begin.session_id == 0x31U);
+    assert(decoded_begin.flags == APP_DRAW_FLAG_CLEAR_FIRST);
+
+    RfDrawText_t text = {
+        .session_id = 0x31U,
+        .op_index = 0x07U,
         .x = 12U,
         .y = 34U,
         .font_id = APP_FONT_16,
-        .flags = APP_DRAW_FLAG_CLEAR_FIRST,
-        .total_text_len = 5U,
+        .text_len = 5U,
     };
-    RfDrawStart_t decoded_start;
+    RfDrawText_t decoded_text;
+    uint8_t text_buf[RF_DRAW_TEXT_FIXED_LEN + 5U + 1U];
+    memcpy(text.text, "Hello", 5U);
 
-    assert(RfDrawProtocol_EncodeStart(&start, buf, RF_DRAW_START_PAYLOAD_LEN - 1U) == 0U);
-    used = RfDrawProtocol_EncodeStart(&start, buf, sizeof(buf));
-    assert(used == RF_DRAW_START_PAYLOAD_LEN);
-    assert(RfDrawProtocol_DecodeStart(buf, used, &decoded_start));
-    assert(decoded_start.x == 12U);
-    assert(decoded_start.y == 34U);
-    assert(decoded_start.font_id == APP_FONT_16);
-    assert(decoded_start.flags == APP_DRAW_FLAG_CLEAR_FIRST);
-    assert(decoded_start.total_text_len == 5U);
+    assert(RfDrawProtocol_EncodeText(&text, buf, RF_DRAW_TEXT_FIXED_LEN + 4U) == 0U);
+    used = RfDrawProtocol_EncodeText(&text, buf, sizeof(buf));
+    assert(used == RF_DRAW_TEXT_FIXED_LEN + 5U);
+    assert(RfDrawProtocol_DecodeText(buf, used, &decoded_text));
+    assert(decoded_text.session_id == 0x31U);
+    assert(decoded_text.op_index == 0x07U);
+    assert(decoded_text.x == 12U);
+    assert(decoded_text.y == 34U);
+    assert(decoded_text.font_id == APP_FONT_16);
+    assert(decoded_text.text_len == 5U);
+    assert(memcmp(decoded_text.text, "Hello", 5U) == 0);
 
-    RfDrawChunk_t chunk = {
-        .chunk_index = 1U,
-        .chunk_len = 3U,
-        .data = {'a', 'b', 'c'},
+    assert(!RfDrawProtocol_DecodeText(buf, RF_DRAW_TEXT_FIXED_LEN - 1U, &decoded_text));
+    memcpy(text_buf, buf, used);
+    text_buf[used] = 0xEEU;
+    assert(!RfDrawProtocol_DecodeText(text_buf, used + 1U, &decoded_text));
+
+    RfDrawText_t max_text = {
+        .session_id = 0x32U,
+        .op_index = 0x08U,
+        .x = 1U,
+        .y = 2U,
+        .font_id = APP_FONT_12,
+        .text_len = RF_DRAW_TEXT_MAX_LEN,
     };
-    RfDrawChunk_t decoded_chunk;
-    uint8_t chunk_buf[RF_DRAW_CHUNK_HEADER_LEN + 3U + 1U];
+    memset(max_text.text, 0x5AU, RF_DRAW_TEXT_MAX_LEN);
 
-    assert(RfDrawProtocol_EncodeChunk(&chunk, buf, RF_DRAW_CHUNK_HEADER_LEN + 2U) == 0U);
-    used = RfDrawProtocol_EncodeChunk(&chunk, buf, sizeof(buf));
-    assert(used == RF_DRAW_CHUNK_HEADER_LEN + 3U);
-    assert(RfDrawProtocol_DecodeChunk(buf, used, &decoded_chunk));
-    assert(decoded_chunk.chunk_index == 1U);
-    assert(decoded_chunk.chunk_len == 3U);
-    assert(memcmp(decoded_chunk.data, "abc", 3U) == 0);
+    assert(RfDrawProtocol_EncodeText(&max_text, buf, RF_DRAW_TEXT_FIXED_LEN + RF_DRAW_TEXT_MAX_LEN - 1U) == 0U);
+    used = RfDrawProtocol_EncodeText(&max_text, buf, sizeof(buf));
+    assert(used == RF_DRAW_TEXT_FIXED_LEN + RF_DRAW_TEXT_MAX_LEN);
+    assert(RfDrawProtocol_DecodeText(buf, used, &decoded_text));
+    assert(decoded_text.session_id == 0x32U);
+    assert(decoded_text.text_len == RF_DRAW_TEXT_MAX_LEN);
+    assert(memcmp(decoded_text.text, max_text.text, RF_DRAW_TEXT_MAX_LEN) == 0);
 
-    assert(!RfDrawProtocol_DecodeChunk(buf, 2U, &decoded_chunk));
-    memcpy(chunk_buf, buf, used);
-    chunk_buf[used] = 0xEEU;
-    assert(!RfDrawProtocol_DecodeChunk(chunk_buf, used + 1U, &decoded_chunk));
+    RfDrawText_t too_large_text = max_text;
+    too_large_text.text_len = (uint8_t)(RF_DRAW_TEXT_MAX_LEN + 1U);
+    assert(RfDrawProtocol_EncodeText(&too_large_text, buf, sizeof(buf)) == 0U);
 
-    RfDrawChunk_t max_chunk = {
-        .chunk_index = 2U,
-        .chunk_len = RF_DRAW_CHUNK_MAX_DATA,
+    RfDrawCommit_t commit = {
+        .session_id = 0x31U,
     };
-    memset(max_chunk.data, 0x5AU, RF_DRAW_CHUNK_MAX_DATA);
+    RfDrawCommit_t decoded_commit;
 
-    assert(RfDrawProtocol_EncodeChunk(&max_chunk, buf, RF_DRAW_CHUNK_HEADER_LEN + RF_DRAW_CHUNK_MAX_DATA - 1U) == 0U);
-    used = RfDrawProtocol_EncodeChunk(&max_chunk, buf, sizeof(buf));
-    assert(used == RF_DRAW_CHUNK_HEADER_LEN + RF_DRAW_CHUNK_MAX_DATA);
-    assert(RfDrawProtocol_DecodeChunk(buf, used, &decoded_chunk));
-    assert(decoded_chunk.chunk_index == 2U);
-    assert(decoded_chunk.chunk_len == RF_DRAW_CHUNK_MAX_DATA);
-    assert(memcmp(decoded_chunk.data, max_chunk.data, RF_DRAW_CHUNK_MAX_DATA) == 0);
-
-    RfDrawChunk_t too_large_chunk = max_chunk;
-    too_large_chunk.chunk_len = (uint8_t)(RF_DRAW_CHUNK_MAX_DATA + 1U);
-    assert(RfDrawProtocol_EncodeChunk(&too_large_chunk, buf, sizeof(buf)) == 0U);
+    assert(RfDrawProtocol_EncodeCommit(&commit, buf, RF_DRAW_COMMIT_PAYLOAD_LEN - 1U) == 0U);
+    used = RfDrawProtocol_EncodeCommit(&commit, buf, sizeof(buf));
+    assert(used == RF_DRAW_COMMIT_PAYLOAD_LEN);
+    assert(RfDrawProtocol_DecodeCommit(buf, used, &decoded_commit));
+    assert(decoded_commit.session_id == 0x31U);
 
     RfDrawAck_t ack = {
-        .phase = RF_DRAW_PHASE_START,
+        .phase = RF_DRAW_PHASE_BEGIN,
         .value = 0U,
     };
     RfDrawAck_t decoded_ack;
@@ -76,11 +93,11 @@ int main(void)
     used = RfDrawProtocol_EncodeAck(&ack, buf, sizeof(buf));
     assert(used == RF_DRAW_ACK_PAYLOAD_LEN);
     assert(RfDrawProtocol_DecodeAck(buf, used, &decoded_ack));
-    assert(decoded_ack.phase == RF_DRAW_PHASE_START);
+    assert(decoded_ack.phase == RF_DRAW_PHASE_BEGIN);
     assert(decoded_ack.value == 0U);
 
     RfDrawError_t error = {
-        .phase = RF_DRAW_PHASE_COMMIT,
+        .phase = RF_DRAW_PHASE_FLUSH,
         .reason = RF_DRAW_ERROR_REASON_RENDER,
     };
     RfDrawError_t decoded_error;
@@ -89,7 +106,7 @@ int main(void)
     used = RfDrawProtocol_EncodeError(&error, buf, sizeof(buf));
     assert(used == RF_DRAW_ERROR_PAYLOAD_LEN);
     assert(RfDrawProtocol_DecodeError(buf, used, &decoded_error));
-    assert(decoded_error.phase == RF_DRAW_PHASE_COMMIT);
+    assert(decoded_error.phase == RF_DRAW_PHASE_FLUSH);
     assert(decoded_error.reason == RF_DRAW_ERROR_REASON_RENDER);
 
     return 0;

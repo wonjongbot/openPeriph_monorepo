@@ -8,16 +8,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define RF_DRAW_START_PAYLOAD_LEN 7U
-#define RF_DRAW_CHUNK_HEADER_LEN 2U
-#define RF_DRAW_CHUNK_MAX_DATA (RF_FRAME_MAX_PAYLOAD - RF_DRAW_CHUNK_HEADER_LEN)
+#define RF_DRAW_BEGIN_PAYLOAD_LEN 2U
+#define RF_DRAW_TEXT_FIXED_LEN 8U
+#define RF_DRAW_TEXT_MAX_LEN 24U
+#define RF_DRAW_COMMIT_PAYLOAD_LEN 1U
 #define RF_DRAW_ACK_PAYLOAD_LEN 2U
 #define RF_DRAW_ERROR_PAYLOAD_LEN 2U
 
 typedef enum {
-    RF_DRAW_PHASE_START = 1U,
-    RF_DRAW_PHASE_CHUNK = 2U,
+    RF_DRAW_PHASE_BEGIN = 1U,
+    RF_DRAW_PHASE_TEXT = 2U,
     RF_DRAW_PHASE_COMMIT = 3U,
+    RF_DRAW_PHASE_FLUSH = 4U,
 } RfDrawPhase_t;
 
 typedef enum {
@@ -28,18 +30,23 @@ typedef enum {
 } RfDrawErrorReason_t;
 
 typedef struct {
+    uint8_t session_id;
+    uint8_t flags;
+} RfDrawBegin_t;
+
+typedef struct {
+    uint8_t session_id;
+    uint8_t op_index;
     uint16_t x;
     uint16_t y;
     uint8_t font_id;
-    uint8_t flags;
-    uint8_t total_text_len;
-} RfDrawStart_t;
+    uint8_t text_len;
+    uint8_t text[RF_DRAW_TEXT_MAX_LEN];
+} RfDrawText_t;
 
 typedef struct {
-    uint8_t chunk_index;
-    uint8_t chunk_len;
-    uint8_t data[RF_DRAW_CHUNK_MAX_DATA];
-} RfDrawChunk_t;
+    uint8_t session_id;
+} RfDrawCommit_t;
 
 typedef struct {
     uint8_t phase;
@@ -51,10 +58,12 @@ typedef struct {
     uint8_t reason;
 } RfDrawError_t;
 
-size_t RfDrawProtocol_EncodeStart(const RfDrawStart_t *start, uint8_t *out_buf, size_t out_capacity);
-bool RfDrawProtocol_DecodeStart(const uint8_t *buf, size_t len, RfDrawStart_t *out_start);
-size_t RfDrawProtocol_EncodeChunk(const RfDrawChunk_t *chunk, uint8_t *out_buf, size_t out_capacity);
-bool RfDrawProtocol_DecodeChunk(const uint8_t *buf, size_t len, RfDrawChunk_t *out_chunk);
+size_t RfDrawProtocol_EncodeBegin(const RfDrawBegin_t *begin, uint8_t *out_buf, size_t out_capacity);
+bool RfDrawProtocol_DecodeBegin(const uint8_t *buf, size_t len, RfDrawBegin_t *out_begin);
+size_t RfDrawProtocol_EncodeText(const RfDrawText_t *text, uint8_t *out_buf, size_t out_capacity);
+bool RfDrawProtocol_DecodeText(const uint8_t *buf, size_t len, RfDrawText_t *out_text);
+size_t RfDrawProtocol_EncodeCommit(const RfDrawCommit_t *commit, uint8_t *out_buf, size_t out_capacity);
+bool RfDrawProtocol_DecodeCommit(const uint8_t *buf, size_t len, RfDrawCommit_t *out_commit);
 size_t RfDrawProtocol_EncodeAck(const RfDrawAck_t *ack, uint8_t *out_buf, size_t out_capacity);
 bool RfDrawProtocol_DecodeAck(const uint8_t *buf, size_t len, RfDrawAck_t *out_ack);
 size_t RfDrawProtocol_EncodeError(const RfDrawError_t *error, uint8_t *out_buf, size_t out_capacity);

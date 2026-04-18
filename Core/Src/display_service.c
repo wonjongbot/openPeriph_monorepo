@@ -30,6 +30,11 @@ bool DisplayService_Clear(bool full_refresh)
     return true;
 }
 
+bool DisplayService_ClearBuffer(void)
+{
+    return true;
+}
+
 bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd)
 {
     (void)cmd;
@@ -48,6 +53,12 @@ bool DisplayService_RenderText(uint16_t x,
     (void)font;
     (void)text;
     (void)clear_first;
+    (void)full_refresh;
+    return true;
+}
+
+bool DisplayService_Flush(bool full_refresh)
+{
     (void)full_refresh;
     return true;
 }
@@ -201,6 +212,14 @@ bool DisplayService_Init(void)
 
 bool DisplayService_Clear(bool full_refresh)
 {
+    if (!DisplayService_ClearBuffer()) {
+        return false;
+    }
+    return DisplayService_Present(full_refresh);
+}
+
+bool DisplayService_ClearBuffer(void)
+{
     if (!s_initialized && !DisplayService_Init()) {
         return false;
     }
@@ -208,15 +227,14 @@ bool DisplayService_Clear(bool full_refresh)
     Paint_SelectImage(DisplayService_MonoBuffer());
     Paint_Clear(WHITE);
     DisplayService_ResetBuffersToWhite();
-    return DisplayService_Present(full_refresh);
+    return true;
 }
 
-bool DisplayService_RenderText(uint16_t x,
-                               uint16_t y,
-                               DisplayServiceFont_t font,
-                               const char *text,
-                               bool clear_first,
-                               bool full_refresh)
+static bool DisplayService_WriteTextToBuffer(uint16_t x,
+                                              uint16_t y,
+                                              DisplayServiceFont_t font,
+                                              const char *text,
+                                              bool clear_first)
 {
     sFONT *selected_font = NULL;
 
@@ -240,6 +258,27 @@ bool DisplayService_RenderText(uint16_t x,
     }
 
     Paint_DrawString_EN(x, y, text, selected_font, BLACK, WHITE);
+    return true;
+}
+
+bool DisplayService_RenderText(uint16_t x,
+                               uint16_t y,
+                               DisplayServiceFont_t font,
+                               const char *text,
+                               bool clear_first,
+                               bool full_refresh)
+{
+    if (!DisplayService_WriteTextToBuffer(x, y, font, text, clear_first)) {
+        return false;
+    }
+    return DisplayService_Present(full_refresh);
+}
+
+bool DisplayService_Flush(bool full_refresh)
+{
+    if (!s_initialized && !DisplayService_Init()) {
+        return false;
+    }
     return DisplayService_Present(full_refresh);
 }
 
@@ -263,12 +302,7 @@ bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd)
     }
 
     DisplayService_CopyCountedText(cmd, text, sizeof(text));
-    return DisplayService_RenderText(cmd->x,
-                                     cmd->y,
-                                     font,
-                                     text,
-                                     (cmd->flags & APP_DRAW_FLAG_CLEAR_FIRST) != 0U,
-                                     (cmd->flags & APP_DRAW_FLAG_FULL_REFRESH) != 0U);
+    return DisplayService_WriteTextToBuffer(cmd->x, cmd->y, font, text, false);
 }
 
 void DisplayService_Sleep(void)

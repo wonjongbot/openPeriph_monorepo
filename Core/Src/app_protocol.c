@@ -2,13 +2,44 @@
 
 #include <string.h>
 
-#define APP_DRAW_TEXT_FIXED_SIZE 8U
+#define APP_DRAW_BEGIN_PAYLOAD_LEN 3U
+#define APP_DRAW_TEXT_FIXED_SIZE 9U
+#define APP_DRAW_COMMIT_PAYLOAD_LEN 2U
+#define APP_DISPLAY_FLUSH_PAYLOAD_LEN 3U
+
+size_t AppProtocol_EncodeDrawBegin(const AppDrawBeginCommand_t *cmd,
+                                   uint8_t *out_buf,
+                                   size_t out_capacity)
+{
+    if ((cmd == NULL) || (out_buf == NULL) || (out_capacity < APP_DRAW_BEGIN_PAYLOAD_LEN)) {
+        return 0U;
+    }
+
+    out_buf[0] = cmd->dst_addr;
+    out_buf[1] = cmd->session_id;
+    out_buf[2] = cmd->flags;
+    return APP_DRAW_BEGIN_PAYLOAD_LEN;
+}
+
+bool AppProtocol_DecodeDrawBegin(const uint8_t *buf,
+                                 size_t len,
+                                 AppDrawBeginCommand_t *out_cmd)
+{
+    if ((buf == NULL) || (out_cmd == NULL) || (len != APP_DRAW_BEGIN_PAYLOAD_LEN)) {
+        return false;
+    }
+
+    out_cmd->dst_addr = buf[0];
+    out_cmd->session_id = buf[1];
+    out_cmd->flags = buf[2];
+    return true;
+}
 
 size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,
                                   uint8_t *out_buf,
                                   size_t out_capacity)
 {
-    if (cmd == NULL || out_buf == NULL) {
+    if ((cmd == NULL) || (out_buf == NULL)) {
         return 0U;
     }
     if (cmd->text_len > APP_TEXT_MAX_LEN) {
@@ -21,13 +52,14 @@ size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,
     }
 
     out_buf[0] = cmd->dst_addr;
-    out_buf[1] = (uint8_t)(cmd->x & 0xFFU);
-    out_buf[2] = (uint8_t)(cmd->x >> 8);
-    out_buf[3] = (uint8_t)(cmd->y & 0xFFU);
-    out_buf[4] = (uint8_t)(cmd->y >> 8);
-    out_buf[5] = cmd->font_id;
-    out_buf[6] = cmd->flags;
-    out_buf[7] = cmd->text_len;
+    out_buf[1] = cmd->session_id;
+    out_buf[2] = cmd->op_index;
+    out_buf[3] = (uint8_t)(cmd->x & 0xFFU);
+    out_buf[4] = (uint8_t)(cmd->x >> 8);
+    out_buf[5] = (uint8_t)(cmd->y & 0xFFU);
+    out_buf[6] = (uint8_t)(cmd->y >> 8);
+    out_buf[7] = cmd->font_id;
+    out_buf[8] = cmd->text_len;
     if (cmd->text_len > 0U) {
         memcpy(&out_buf[APP_DRAW_TEXT_FIXED_SIZE], cmd->text, cmd->text_len);
     }
@@ -39,14 +71,14 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf,
                                 size_t len,
                                 AppDrawTextCommand_t *out_cmd)
 {
-    if (buf == NULL || out_cmd == NULL) {
+    if ((buf == NULL) || (out_cmd == NULL)) {
         return false;
     }
     if (len < APP_DRAW_TEXT_FIXED_SIZE) {
         return false;
     }
 
-    const uint8_t text_len = buf[7];
+    const uint8_t text_len = buf[8];
     const size_t total_len = APP_DRAW_TEXT_FIXED_SIZE + (size_t)text_len;
     if (text_len > APP_TEXT_MAX_LEN) {
         return false;
@@ -56,15 +88,70 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf,
     }
 
     out_cmd->dst_addr = buf[0];
-    out_cmd->x = (uint16_t)buf[1] | ((uint16_t)buf[2] << 8);
-    out_cmd->y = (uint16_t)buf[3] | ((uint16_t)buf[4] << 8);
-    out_cmd->font_id = buf[5];
-    out_cmd->flags = buf[6];
+    out_cmd->session_id = buf[1];
+    out_cmd->op_index = buf[2];
+    out_cmd->x = (uint16_t)buf[3] | ((uint16_t)buf[4] << 8);
+    out_cmd->y = (uint16_t)buf[5] | ((uint16_t)buf[6] << 8);
+    out_cmd->font_id = buf[7];
     out_cmd->text_len = text_len;
 
     if (text_len > 0U) {
         memcpy(out_cmd->text, &buf[APP_DRAW_TEXT_FIXED_SIZE], text_len);
     }
 
+    return true;
+}
+
+size_t AppProtocol_EncodeDrawCommit(const AppDrawCommitCommand_t *cmd,
+                                    uint8_t *out_buf,
+                                    size_t out_capacity)
+{
+    if ((cmd == NULL) || (out_buf == NULL) || (out_capacity < APP_DRAW_COMMIT_PAYLOAD_LEN)) {
+        return 0U;
+    }
+
+    out_buf[0] = cmd->dst_addr;
+    out_buf[1] = cmd->session_id;
+    return APP_DRAW_COMMIT_PAYLOAD_LEN;
+}
+
+bool AppProtocol_DecodeDrawCommit(const uint8_t *buf,
+                                  size_t len,
+                                  AppDrawCommitCommand_t *out_cmd)
+{
+    if ((buf == NULL) || (out_cmd == NULL) || (len != APP_DRAW_COMMIT_PAYLOAD_LEN)) {
+        return false;
+    }
+
+    out_cmd->dst_addr = buf[0];
+    out_cmd->session_id = buf[1];
+    return true;
+}
+
+size_t AppProtocol_EncodeDisplayFlush(const AppDisplayFlushCommand_t *cmd,
+                                      uint8_t *out_buf,
+                                      size_t out_capacity)
+{
+    if ((cmd == NULL) || (out_buf == NULL) || (out_capacity < APP_DISPLAY_FLUSH_PAYLOAD_LEN)) {
+        return 0U;
+    }
+
+    out_buf[0] = cmd->dst_addr;
+    out_buf[1] = cmd->session_id;
+    out_buf[2] = cmd->full_refresh ? 1U : 0U;
+    return APP_DISPLAY_FLUSH_PAYLOAD_LEN;
+}
+
+bool AppProtocol_DecodeDisplayFlush(const uint8_t *buf,
+                                    size_t len,
+                                    AppDisplayFlushCommand_t *out_cmd)
+{
+    if ((buf == NULL) || (out_cmd == NULL) || (len != APP_DISPLAY_FLUSH_PAYLOAD_LEN)) {
+        return false;
+    }
+
+    out_cmd->dst_addr = buf[0];
+    out_cmd->session_id = buf[1];
+    out_cmd->full_refresh = (buf[2] != 0U);
     return true;
 }
