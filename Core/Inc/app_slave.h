@@ -2,11 +2,19 @@
 #define APP_SLAVE_H
 
 #include "app_protocol.h"
+#include "cc1101_radio.h"
 #include "display_service.h"
 #include "rf_link.h"
 #include "rf_draw_protocol.h"
 
 #include <string.h>
+
+extern void HAL_Delay(uint32_t delay);
+extern uint32_t HAL_GetTick(void);
+
+/* If the slave receives nothing for this long, re-init the CC1101.
+ * Cheap insurance against the radio silently leaving RX mode. */
+#define APP_SLAVE_RADIO_WATCHDOG_MS 2000U
 
 typedef struct {
     bool has_session;
@@ -88,8 +96,15 @@ static inline void AppSlave_HandleDrawBegin(const RfFrame_t *frame)
         return;
     }
 
+    /* If an active (uncommitted) session with the same id and flags is
+     * already running, treat this as a duplicate retransmission and just
+     * re-ACK.  However, if the previous session was already committed or
+     * flushed, we must start fresh — the master is beginning a new draw
+     * cycle that happens to reuse the same session_id. */
     if (g_app_slave_draw_state.has_session &&
-        (g_app_slave_draw_state.session_id == begin.session_id)) {
+        (g_app_slave_draw_state.session_id == begin.session_id) &&
+        !g_app_slave_draw_state.committed &&
+        !g_app_slave_draw_state.flushed) {
         if (g_app_slave_draw_state.begin_flags != begin.flags) {
             AppSlave_SendDrawError(frame, RF_DRAW_PHASE_BEGIN, RF_DRAW_ERROR_REASON_BAD_STATE);
             return;
@@ -99,6 +114,14 @@ static inline void AppSlave_HandleDrawBegin(const RfFrame_t *frame)
     }
 
     AppSlave_ClearDrawState();
+
+    /* Full CC1101 re-init at the start of every new draw session.
+     * After ~130 sustained TX/RX cycles the CC1101 state machine can
+     * degrade into an unrecoverable state that RecoverRx() alone cannot
+     * fix.  A fresh SRES + register reload guarantees a clean radio for
+     * the upcoming burst of draw operations. */
+    (void)Cc1101Radio_Init();
+
     if ((begin.flags & APP_DRAW_FLAG_CLEAR_FIRST) != 0U) {
         if (!DisplayService_ClearBuffer()) {
             AppSlave_SendDrawError(frame, RF_DRAW_PHASE_BEGIN, RF_DRAW_ERROR_REASON_RENDER);
@@ -187,13 +210,27 @@ static inline void AppSlave_HandleDisplayFlush(const RfFrame_t *frame)
         return;
     }
 
-    if (DisplayService_Flush(full_refresh)) {
-        g_app_slave_draw_state.flushed = true;
-        g_app_slave_draw_state.accepting_text = false;
+    /* Send the ACK multiple times before the blocking EPD refresh.
+     * A single ACK over the unreliable RF link may get lost, and once
+     * DisplayService_Flush() starts the slave is deaf for 3-5 seconds
+     * (the 5.83" panel full-refresh time).  Sending a short burst
+     * raises the probability that the master sees at least one. */
+    g_app_slave_draw_state.flushed = true;
+    g_app_slave_draw_state.accepting_text = false;
+
+    for (uint8_t ack_burst = 0U; ack_burst < 3U; ++ack_burst) {
         AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_FLUSH, 0U);
-    } else {
-        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_FLUSH, RF_DRAW_ERROR_REASON_RENDER);
+        if (ack_burst < 2U) {
+            HAL_Delay(2U);          /* 2 ms settling between transmits */
+        }
     }
+
+    (void)DisplayService_Flush(full_refresh);
+
+    /* The EPD refresh uses SPI for 3-5 seconds and may disturb the
+     * CC1101 (which shares the SPI bus).  Re-init the radio so the
+     * slave is ready to receive the next session's DRAW_BEGIN. */
+    (void)Cc1101Radio_Init();
 }
 
 static inline void AppSlave_HandleDrawCommit(const RfFrame_t *frame)
@@ -227,11 +264,24 @@ static inline void AppSlave_Init(void)
 
 static inline void AppSlave_Poll(void)
 {
+    static uint32_t last_good_rx_tick = 0U;
     RfFrame_t frame;
 
     if (!RfLink_TryReceiveFrame(&frame)) {
+        /* Radio watchdog: if nothing has been received for 2 seconds,
+         * the CC1101 may have silently left RX mode (e.g. after an EPD
+         * refresh that shared the SPI bus, or a FIFO overflow that
+         * wasn't caught).  A full re-init is cheap (~1 ms) and
+         * guarantees we're listening again. */
+        if ((HAL_GetTick() - last_good_rx_tick) >= APP_SLAVE_RADIO_WATCHDOG_MS) {
+            (void)Cc1101Radio_Init();
+            last_good_rx_tick = HAL_GetTick();
+        }
         return;
     }
+
+    last_good_rx_tick = HAL_GetTick();
+
     if (!RfLink_IsForLocalNode(&frame)) {
         return;
     }

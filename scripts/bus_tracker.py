@@ -408,6 +408,31 @@ def render_once(canvas: EinkCanvas, api_key: str, stop_id: str, vehicle_cache: d
     render_lines_to_canvas(canvas, lines, font=FONT, line_spacing=LINE_SPACING)
 
 
+def build_test_lines(cycle: int = 0) -> list[str]:
+    """Generate a static bus-tracker layout for stress testing (no API)."""
+    now = datetime.datetime.now()
+    fake_departures = [
+        {"expected_mins": 2, "headsign": "Green West", "is_monitored": True,
+         "is_scheduled": True, "vehicle_id": "1724",
+         "route": {"route_short_name": "50"}},
+        {"expected_mins": 5, "headsign": "Teal Orchard Downs", "is_monitored": True,
+         "is_scheduled": True, "vehicle_id": "1721",
+         "route": {"route_short_name": "120"}},
+        {"expected_mins": 8, "headsign": "Illini Limited", "is_monitored": True,
+         "is_scheduled": True, "vehicle_id": "2022",
+         "route": {"route_short_name": "220"}},
+    ]
+    fake_vehicles = {
+        "1724": {"previous_stop_id": "RACEMU", "next_stop_id": "GWNMN",
+                 "last_updated": now.isoformat()},
+        "1721": {"previous_stop_id": "PAMD", "next_stop_id": "GWNNV",
+                 "last_updated": now.isoformat()},
+        "2022": {"previous_stop_id": "GRGIKE", "next_stop_id": "GWNMN",
+                 "last_updated": now.isoformat()},
+    }
+    return build_display_lines(f"IU (test #{cycle})", "IU", fake_departures, fake_vehicles, now)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Graphic MTD bus tracker for e-ink display")
     parser.add_argument('--port', required=True, help='Serial port')
@@ -417,12 +442,40 @@ def main():
                         help='MTD stop ID (default: IU = Illinois Terminal)')
     parser.add_argument('--api-key', default=None,
                         help='CUMTD API key (or set MTD_API_KEY env var)')
-    parser.add_argument('--chunk-size', type=int, default=20,
-                        help='Max chars per RF draw call')
+    parser.add_argument('--chunk-size', type=int, default=24,
+                        help='Max chars per RF draw call (default: 24, max for RF)')
     parser.add_argument('--loop-minutes', type=int, default=0,
                         help='Refresh cadence in minutes (0 = render once, minimum 1)')
+    parser.add_argument('--test', type=int, default=0, metavar='N',
+                        help='Stress test: render static data N times (no API needed)')
+    parser.add_argument('--test-delay', type=int, default=10,
+                        help='Seconds between stress test cycles (default: 10)')
     args = parser.parse_args()
 
+    # ── Stress-test mode ──────────────────────────────────────────
+    if args.test > 0:
+        with EinkCanvas(args.port, args.dst, chunk_size=args.chunk_size) as canvas:
+            passed = 0
+            failed = 0
+            for cycle in range(1, args.test + 1):
+                print(f"\n=== Stress test cycle {cycle}/{args.test} ===")
+                lines = build_test_lines(cycle)
+                for line in lines:
+                    print(f"  {line}")
+                try:
+                    render_lines_to_canvas(canvas, lines, font=FONT, line_spacing=LINE_SPACING)
+                    passed += 1
+                    print(f"  PASS (cycle {cycle})")
+                except Exception as exc:
+                    failed += 1
+                    print(f"  FAIL (cycle {cycle}): {exc}")
+                if cycle < args.test:
+                    print(f"  Waiting {args.test_delay}s...")
+                    time.sleep(args.test_delay)
+            print(f"\n=== Results: {passed} passed, {failed} failed out of {args.test} ===")
+        return
+
+    # ── Normal API mode ───────────────────────────────────────────
     api_key = normalize_api_key(args.api_key) or normalize_api_key(os.environ.get('MTD_API_KEY'))
     if not api_key:
         print("Error: provide --api-key or set MTD_API_KEY environment variable")

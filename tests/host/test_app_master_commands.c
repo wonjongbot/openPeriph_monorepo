@@ -262,6 +262,11 @@ uint32_t HAL_GetTick(void)
     return g_tick++;
 }
 
+void HAL_Delay(uint32_t delay)
+{
+    g_tick += delay;
+}
+
 static void ResetCaptures(void)
 {
     g_last_ack_id = 0U;

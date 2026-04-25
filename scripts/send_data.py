@@ -151,11 +151,11 @@ def get_last_rf_ping_result():
     return dict(_last_rf_ping_result)
 
 # ── High-level senders ────────────────────────────────────────────
-def send_and_wait_ack(ser, frame, label="packet"):
+def send_and_wait_ack(ser, frame, label="packet", timeout: float = 2.0):
     ser.write(frame)
     print(f"  Sent {label} ({len(frame)} bytes)")
 
-    resp = read_response(ser)
+    resp = read_response(ser, timeout=timeout)
     if resp['valid'] and resp['type'] == PKT_TYPE_ACK:
         telemetry = parse_ack_telemetry(resp['payload'])
         if label == "DRAW_TEXT" and telemetry is not None:
@@ -353,7 +353,9 @@ def encode_flush_payload(dst: int, session_id: int, full_refresh: bool) -> bytes
 
 def send_display_flush(ser, payload: bytes):
     frame = build_packet(PKT_TYPE_DISPLAY_FLUSH, payload)
-    return send_and_wait_ack(ser, frame, "DISPLAY_FLUSH")
+    # If the slave's 3× ACK burst is lost, the master must wait for the
+    # EPD refresh (3-5 s) to finish before the slave can re-ACK.
+    return send_and_wait_ack(ser, frame, "DISPLAY_FLUSH", timeout=10.0)
 
 def print_rf_ping_bench_summary(results):
     total = len(results)

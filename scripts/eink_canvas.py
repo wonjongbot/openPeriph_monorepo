@@ -35,6 +35,21 @@ DISPLAY_HEIGHT_PX = 480
 FONT_WIDTHS  = {12: 7, 16: 11}
 FONT_HEIGHTS = {12: 12, 16: 16}
 
+# Pacing delay (seconds) between RF draw_text calls.
+# Gives the CC1101 radios on both master and slave time to complete
+# TX->IDLE->RX transitions cleanly under sustained multi-frame sessions.
+RF_INTER_OP_DELAY_S = 0.012
+
+# Cooldown (seconds) before retrying a failed RF operation in-place.
+# Lets the CC1101 radio recover from transient FIFO / state issues
+# without restarting the entire draw session.
+RF_RETRY_COOLDOWN_S = 0.15
+
+# Max in-place retries per operation before giving up.
+# Each attempt already includes firmware-level retries (8 attempts,
+# 3 s total), so this is a secondary recovery layer.
+RF_OP_RETRIES = 2
+
 
 class EinkCanvas:
     def __init__(self, port: str, dst: int, baud: int = 115200, chunk_size: int = 20):
@@ -85,7 +100,10 @@ class EinkCanvas:
         self._session_id = send_data.next_draw_session_id()
         self._clear_first = clear_first
         payload = send_data.encode_draw_begin_payload(self.dst, self._session_id, clear_first)
-        if not send_data.send_draw_begin(self._ser, payload):
+        if not self._send_with_retry(
+            lambda: send_data.send_draw_begin(self._ser, payload),
+            label="DRAW_BEGIN",
+        ):
             self._reset_session()
             return False
         return True
@@ -97,38 +115,22 @@ class EinkCanvas:
             return self.clear()
         return True
 
-    def _replay_session(self, full_refresh: bool = None) -> bool:
-        ops = list(self._ops)
-        clear_first = self._clear_first
-        if not self._begin_session(clear_first):
-            return False
+    def _send_with_retry(self, send_fn, label="op") -> bool:
+        """Try send_fn(); on failure, wait and retry in-place up to RF_OP_RETRIES times.
 
-        for op_index, (x, y, font, chunk) in enumerate(ops):
-            payload = send_data.encode_draw_text_payload(
-                self.dst,
-                self._session_id,
-                op_index,
-                x,
-                y,
-                str(font),
-                chunk,
-            )
-            if not send_data.send_draw_text(self._ser, payload):
-                return False
-
-        if full_refresh is None:
+        The firmware already retries each RF exchange internally (8 attempts,
+        3 s window).  This adds a higher-level cooldown-and-retry so that
+        transient CC1101 state issues (FIFO overflow, bad MARC state) have
+        time to clear before the next attempt — without restarting the
+        whole session from scratch.
+        """
+        if send_fn():
             return True
-
-        commit_payload = send_data.encode_draw_commit_payload(self.dst, self._session_id)
-        if not send_data.send_draw_commit(self._ser, commit_payload):
-            return False
-
-        flush_payload = send_data.encode_flush_payload(self.dst, self._session_id, full_refresh)
-        if not send_data.send_display_flush(self._ser, flush_payload):
-            return False
-
-        self._reset_session()
-        return True
+        for retry in range(RF_OP_RETRIES):
+            time.sleep(RF_RETRY_COOLDOWN_S)
+            if send_fn():
+                return True
+        return False
 
     def draw_text(self, text: str, x: int, y: int, font: int = 16,
                   clear_first: bool = False) -> bool:
@@ -147,10 +149,15 @@ class EinkCanvas:
             payload = send_data.encode_draw_text_payload(
                 self.dst, self._session_id, op_index, op_x, y, str(font), chunk
             )
-            if not send_data.send_draw_text(self._ser, payload):
-                if not self._replay_session(full_refresh=None):
-                    ok = False
-                    break
+            # Pace RF operations to avoid overwhelming the CC1101 radios
+            if op_index > 0:
+                time.sleep(RF_INTER_OP_DELAY_S)
+            if not self._send_with_retry(
+                lambda p=payload: send_data.send_draw_text(self._ser, p),
+                label=f"DRAW_TEXT op {op_index}",
+            ):
+                ok = False
+                break
             x += len(chunk) * FONT_WIDTHS.get(font, 11)
         return ok
 
@@ -177,13 +184,21 @@ class EinkCanvas:
         if self._session_id is None:
             return True
 
+        time.sleep(RF_INTER_OP_DELAY_S)
         commit_payload = send_data.encode_draw_commit_payload(self.dst, self._session_id)
-        if not send_data.send_draw_commit(self._ser, commit_payload):
-            return self._replay_session(full_refresh=full_refresh)
+        if not self._send_with_retry(
+            lambda: send_data.send_draw_commit(self._ser, commit_payload),
+            label="DRAW_COMMIT",
+        ):
+            return False
 
+        time.sleep(RF_INTER_OP_DELAY_S)
         flush_payload = send_data.encode_flush_payload(self.dst, self._session_id, full_refresh)
-        if not send_data.send_display_flush(self._ser, flush_payload):
-            return self._replay_session(full_refresh=full_refresh)
+        if not self._send_with_retry(
+            lambda: send_data.send_display_flush(self._ser, flush_payload),
+            label="DISPLAY_FLUSH",
+        ):
+            return False
 
         self._reset_session()
         return True

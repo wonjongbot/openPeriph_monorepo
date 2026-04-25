@@ -19,6 +19,7 @@ uint16_t OpenPeriph_GetUsbRxAvailable(void);
 void OpenPeriph_ResetSystem(void);
 bool OpenPeriph_RenderLocalHello(void);
 extern uint32_t HAL_GetTick(void);
+extern void HAL_Delay(uint32_t delay);
 
 static inline void AppMaster_Init(void)
 {
@@ -30,6 +31,8 @@ static inline bool AppMaster_WaitForDrawResponse(uint8_t dst_addr,
                                                  uint8_t expected_value,
                                                  uint32_t absolute_start_tick,
                                                  uint32_t attempt_start_tick,
+                                                 uint32_t attempt_timeout_ms,
+                                                 uint32_t total_timeout_ms,
                                                  uint8_t *out_nack_reason)
 {
     RfFrame_t response;
@@ -38,8 +41,8 @@ static inline bool AppMaster_WaitForDrawResponse(uint8_t dst_addr,
         *out_nack_reason = 0x05U;
     }
 
-    while (((HAL_GetTick() - attempt_start_tick) < RF_LINK_ATTEMPT_TIMEOUT_MS) &&
-           ((HAL_GetTick() - absolute_start_tick) < RF_LINK_DRAW_TOTAL_TIMEOUT_MS)) {
+    while (((HAL_GetTick() - attempt_start_tick) < attempt_timeout_ms) &&
+           ((HAL_GetTick() - absolute_start_tick) < total_timeout_ms)) {
         RfDrawAck_t ack;
         RfDrawError_t error;
 
@@ -76,12 +79,20 @@ static inline bool AppMaster_WaitForDrawResponse(uint8_t dst_addr,
     return false;
 }
 
-static inline bool AppMaster_ExchangeDrawFrame(const RfFrame_t *frame,
-                                               uint8_t expected_phase,
-                                               uint8_t expected_value,
-                                               uint8_t *out_nack_reason)
+static inline bool AppMaster_ExchangeDrawFrameWithTimeout(const RfFrame_t *frame,
+                                                          uint8_t expected_phase,
+                                                          uint8_t expected_value,
+                                                          uint32_t total_timeout_ms,
+                                                          uint8_t *out_nack_reason)
 {
     const uint32_t absolute_start_tick = HAL_GetTick();
+    /* For flush, the slave blocks on the EPD refresh (up to 5 s), so each
+     * attempt needs a long wait window.  For normal draw ops the standard
+     * 75 ms per-attempt timeout applies. */
+    const uint32_t attempt_timeout =
+        (total_timeout_ms > RF_LINK_DRAW_TOTAL_TIMEOUT_MS)
+            ? total_timeout_ms   /* wait the full window on each attempt */
+            : RF_LINK_ATTEMPT_TIMEOUT_MS;
 
     if (frame == NULL) {
         return false;
@@ -93,12 +104,13 @@ static inline bool AppMaster_ExchangeDrawFrame(const RfFrame_t *frame,
 
     for (uint8_t attempt = 0U;
          (attempt < RF_LINK_MAX_RETRIES) &&
-         ((HAL_GetTick() - absolute_start_tick) < RF_LINK_DRAW_TOTAL_TIMEOUT_MS);
+         ((HAL_GetTick() - absolute_start_tick) < total_timeout_ms);
          ++attempt) {
         uint32_t attempt_start_tick;
 
         if (!RfLink_SendFrame(frame)) {
             (void)Cc1101Radio_RecoverRx();
+            HAL_Delay(2U);
             continue;
         }
 
@@ -109,6 +121,8 @@ static inline bool AppMaster_ExchangeDrawFrame(const RfFrame_t *frame,
                                           expected_value,
                                           absolute_start_tick,
                                           attempt_start_tick,
+                                          attempt_timeout,
+                                          total_timeout_ms,
                                           out_nack_reason)) {
             return true;
         }
@@ -118,9 +132,21 @@ static inline bool AppMaster_ExchangeDrawFrame(const RfFrame_t *frame,
         }
 
         (void)Cc1101Radio_RecoverRx();
+        HAL_Delay(2U);
     }
 
     return false;
+}
+
+static inline bool AppMaster_ExchangeDrawFrame(const RfFrame_t *frame,
+                                               uint8_t expected_phase,
+                                               uint8_t expected_value,
+                                               uint8_t *out_nack_reason)
+{
+    return AppMaster_ExchangeDrawFrameWithTimeout(frame, expected_phase,
+                                                  expected_value,
+                                                  RF_LINK_DRAW_TOTAL_TIMEOUT_MS,
+                                                  out_nack_reason);
 }
 
 static inline bool AppMaster_ExchangeDrawBegin(const AppDrawBeginCommand_t *cmd,
@@ -133,6 +159,11 @@ static inline bool AppMaster_ExchangeDrawBegin(const AppDrawBeginCommand_t *cmd,
     if (cmd == NULL) {
         return false;
     }
+
+    /* Full CC1101 re-init before each draw session.  After ~130 sustained
+     * TX/RX cycles the radio state machine can degrade; a fresh SRES +
+     * register reload guarantees a clean start for the next burst. */
+    (void)Cc1101Radio_Init();
 
     begin.session_id = cmd->session_id;
     begin.flags = cmd->flags;
@@ -228,7 +259,13 @@ static inline bool AppMaster_SendDisplayFlush(const AppDisplayFlushCommand_t *cm
     frame.payload[1] = cmd->full_refresh ? 1U : 0U;
     frame.payload_len = 2U;
 
-    return AppMaster_ExchangeDrawFrame(&frame, RF_DRAW_PHASE_FLUSH, 0U, out_nack_reason);
+    /* The slave sends a 3× ACK burst before the blocking EPD refresh,
+     * but if every burst packet is lost, the master must wait for the
+     * full refresh (3-5 s) to finish so the slave can re-ACK via the
+     * "already flushed" path.  Use the longer flush timeout. */
+    return AppMaster_ExchangeDrawFrameWithTimeout(&frame, RF_DRAW_PHASE_FLUSH, 0U,
+                                                  RF_LINK_FLUSH_TOTAL_TIMEOUT_MS,
+                                                  out_nack_reason);
 }
 
 static inline bool AppMaster_SendDrawBegin(const Packet_t *pkt, uint8_t *out_nack_reason)
