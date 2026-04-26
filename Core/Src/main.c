@@ -202,6 +202,10 @@ int main(void)
         }
     }
 
+#if OPENPERIPH_ROLE == OPENPERIPH_ROLE_MASTER
+    AppMaster_PollRfEvents();
+#endif
+
 #if OPENPERIPH_ROLE == OPENPERIPH_ROLE_SLAVE
     AppSlave_Poll();
 #endif

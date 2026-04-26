@@ -359,6 +359,39 @@ static inline void AppMaster_HandleCommand(const Packet_t *pkt)
     }
 }
 
+static inline void AppMaster_HandleAgentTriggerFrame(const RfFrame_t *frame)
+{
+    uint8_t payload[5];
+
+    if ((frame == NULL) || (frame->payload_len != 4U)) {
+        return;
+    }
+    if ((frame->version != RF_FRAME_VERSION) ||
+        (frame->msg_type != RF_MSG_AGENT_TRIGGER) ||
+        (frame->dst_addr != OPENPERIPH_NODE_ADDR)) {
+        return;
+    }
+
+    payload[0] = frame->src_addr;
+    payload[1] = frame->payload[0];
+    payload[2] = frame->payload[1];
+    payload[3] = frame->payload[2];
+    payload[4] = frame->payload[3];
+    OpenPeriph_SendUsbPacket(PKT_TYPE_AGENT_EVENT, payload, sizeof(payload));
+}
+
+static inline void AppMaster_PollRfEvents(void)
+{
+    RfFrame_t frame;
+
+    if (!RfLink_TryReceiveFrame(&frame)) {
+        return;
+    }
+    if (frame.msg_type == RF_MSG_AGENT_TRIGGER) {
+        AppMaster_HandleAgentTriggerFrame(&frame);
+    }
+}
+
 static inline void AppMaster_HandleUsbPacket(const Packet_t *pkt)
 {
     if (pkt == NULL) {

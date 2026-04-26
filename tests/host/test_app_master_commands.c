@@ -24,6 +24,9 @@ static ScriptedRxStep_t g_scripted_rx_steps[64];
 static uint8_t g_scripted_rx_step_count;
 static uint8_t g_scripted_rx_step_index;
 static uint32_t g_tick;
+static PacketType_t g_last_usb_packet_type;
+static uint8_t g_last_usb_packet_payload[16];
+static uint16_t g_last_usb_packet_len;
 
 static bool g_decode_begin_result;
 static AppDrawBeginCommand_t g_begin_cmd;
@@ -47,9 +50,12 @@ void OpenPeriph_SendUsbNack(uint8_t packet_id, uint8_t reason)
 
 void OpenPeriph_SendUsbPacket(PacketType_t type, const uint8_t *payload, uint16_t len)
 {
-    (void)type;
-    (void)payload;
-    (void)len;
+    g_last_usb_packet_type = type;
+    g_last_usb_packet_len = len;
+    memset(g_last_usb_packet_payload, 0, sizeof(g_last_usb_packet_payload));
+    if ((payload != NULL) && (len <= sizeof(g_last_usb_packet_payload))) {
+        memcpy(g_last_usb_packet_payload, payload, len);
+    }
 }
 
 uint16_t OpenPeriph_GetUsbRxAvailable(void)
@@ -84,6 +90,11 @@ bool Cc1101Radio_ReadChipInfo(uint8_t *partnum, uint8_t *version)
 bool Cc1101Radio_RecoverRx(void)
 {
     ++g_recover_rx_calls;
+    return true;
+}
+
+bool Cc1101Radio_Init(void)
+{
     return true;
 }
 
@@ -280,6 +291,9 @@ static void ResetCaptures(void)
     g_scripted_rx_step_count = 0U;
     g_scripted_rx_step_index = 0U;
     g_tick = 0U;
+    g_last_usb_packet_type = 0U;
+    memset(g_last_usb_packet_payload, 0, sizeof(g_last_usb_packet_payload));
+    g_last_usb_packet_len = 0U;
     g_decode_begin_result = false;
     memset(&g_begin_cmd, 0, sizeof(g_begin_cmd));
     g_decode_text_result = false;
@@ -324,6 +338,14 @@ static void ScriptDrawError(uint8_t src_addr, uint8_t seq, uint8_t phase, uint8_
 {
     uint8_t payload[RF_DRAW_ERROR_PAYLOAD_LEN] = { phase, reason };
     ScriptDrawResponse(RF_MSG_DRAW_ERROR, src_addr, seq, payload, RF_DRAW_ERROR_PAYLOAD_LEN);
+}
+
+static void ScriptAgentTrigger(uint8_t src_addr,
+                               uint8_t seq,
+                               const uint8_t *payload,
+                               uint8_t payload_len)
+{
+    ScriptDrawResponse(RF_MSG_AGENT_TRIGGER, src_addr, seq, payload, payload_len);
 }
 
 static void ScriptNoFrame(uint8_t count)
@@ -526,6 +548,36 @@ static void TestDrawTextTimeoutRecoversRadioAndNacks(void)
     assert(g_recover_rx_calls == RF_LINK_MAX_RETRIES);
 }
 
+static void TestMasterPollBridgesAgentTriggerToUsb(void)
+{
+    const uint8_t payload[4] = { 0x7AU, 0x01U, 0x34U, 0x12U };
+
+    ResetCaptures();
+    ScriptAgentTrigger(0x22U, 0x7AU, payload, sizeof(payload));
+
+    AppMaster_PollRfEvents();
+
+    assert(g_last_usb_packet_type == PKT_TYPE_AGENT_EVENT);
+    assert(g_last_usb_packet_len == 5U);
+    assert(g_last_usb_packet_payload[0] == 0x22U);
+    assert(g_last_usb_packet_payload[1] == 0x7AU);
+    assert(g_last_usb_packet_payload[2] == 0x01U);
+    assert(g_last_usb_packet_payload[3] == 0x34U);
+    assert(g_last_usb_packet_payload[4] == 0x12U);
+}
+
+static void TestMasterPollIgnoresMalformedAgentTrigger(void)
+{
+    const uint8_t payload[3] = { 0x7AU, 0x01U, 0x34U };
+
+    ResetCaptures();
+    ScriptAgentTrigger(0x22U, 0x7AU, payload, sizeof(payload));
+
+    AppMaster_PollRfEvents();
+
+    assert(g_last_usb_packet_len == 0U);
+}
+
 int main(void)
 {
     TestDrawBeginSuccess();
@@ -534,5 +586,7 @@ int main(void)
     TestDrawCommitAndFlushSuccess();
     TestDrawTextRemoteErrorMapsToUsbNack();
     TestDrawTextTimeoutRecoversRadioAndNacks();
+    TestMasterPollBridgesAgentTriggerToUsb();
+    TestMasterPollIgnoresMalformedAgentTrigger();
     return 0;
 }
