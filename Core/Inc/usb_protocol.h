@@ -61,6 +61,7 @@ typedef enum {
     PKT_TYPE_STATUS         = 0x82,  /* MCU status report */
     PKT_TYPE_RF_TX_DONE     = 0x83,  /* CC1101 finished transmitting */
     PKT_TYPE_RF_RX_DATA     = 0x84,  /* Data received over RF */
+    PKT_TYPE_AGENT_EVENT    = 0x85,  /* Slave button event forwarded to host */
     PKT_TYPE_ERROR          = 0xFE,  /* Error report */
     PKT_TYPE_DEBUG          = 0xFF,  /* Debug / log message */
 } PacketType_t;

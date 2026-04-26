@@ -37,6 +37,7 @@ PKT_TYPE_DISPLAY_FLUSH  = 0x14
 PKT_TYPE_ACK         = 0x80
 PKT_TYPE_NACK        = 0x81
 PKT_TYPE_STATUS      = 0x82
+PKT_TYPE_AGENT_EVENT = 0x85
 
 CMD_PING             = 0x00
 CMD_GET_STATUS       = 0x04
@@ -149,6 +150,16 @@ def get_last_rf_ping_result():
     if _last_rf_ping_result is None:
         return None
     return dict(_last_rf_ping_result)
+
+def parse_agent_event_payload(payload: bytes) -> dict:
+    if len(payload) != 5:
+        raise ValueError("agent event payload must be exactly 5 bytes")
+    return {
+        'slave_addr': payload[0],
+        'event_id': payload[1],
+        'press_type': payload[2],
+        'uptime_ms': payload[3] | (payload[4] << 8),
+    }
 
 # ── High-level senders ────────────────────────────────────────────
 def send_and_wait_ack(ser, frame, label="packet", timeout: float = 2.0):

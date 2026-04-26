@@ -39,6 +39,21 @@ class SendDataTests(unittest.TestCase):
     def test_get_last_rf_ping_result_is_none_before_any_ping(self):
         self.assertIsNone(send_data.get_last_rf_ping_result())
 
+    def test_parse_agent_event_payload(self):
+        payload = bytes([0x22, 0x7A, 0x01, 0x34, 0x12])
+
+        event = send_data.parse_agent_event_payload(payload)
+
+        self.assertEqual(event, {
+            'slave_addr': 0x22,
+            'event_id': 0x7A,
+            'press_type': 0x01,
+            'uptime_ms': 0x1234,
+        })
+
+        with self.assertRaises(ValueError):
+            send_data.parse_agent_event_payload(b'\x22')
+
     def test_status_reports_nack_reason(self):
         response = send_data.build_packet(
             send_data.PKT_TYPE_NACK,
