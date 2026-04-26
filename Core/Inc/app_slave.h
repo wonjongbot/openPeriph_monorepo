@@ -348,7 +348,6 @@ static inline void AppSlave_PollButton(void)
     if (sample == GPIO_PIN_SET) {
         g_app_slave_button_state.armed = true;
         g_app_slave_button_state.waiting_for_debounce = false;
-        g_app_slave_button_state.debounce_start_tick = now;
         g_app_slave_button_state.last_sample = sample;
         return;
     }
@@ -357,7 +356,9 @@ static inline void AppSlave_PollButton(void)
         if (!g_app_slave_button_state.waiting_for_debounce ||
             (g_app_slave_button_state.last_sample != sample)) {
             g_app_slave_button_state.waiting_for_debounce = true;
+            g_app_slave_button_state.debounce_start_tick = now;
             g_app_slave_button_state.last_sample = sample;
+            return;
         }
 
         if ((now - g_app_slave_button_state.debounce_start_tick) >= APP_SLAVE_BUTTON_DEBOUNCE_MS) {

@@ -480,8 +480,14 @@ static void TestButtonHeldLowOnlyTriggersOnceUntilReleased(void)
     ResetFakes();
     g_send_frame_result = true;
     g_button_pin_state = GPIO_PIN_RESET;
+
+    AppSlave_Poll();
+    assert(g_sent_frame.msg_type == 0U);
+
     g_tick = 31U;
     AppSlave_Poll();
+    assert(g_sent_frame.msg_type == RF_MSG_AGENT_TRIGGER);
+    assert(g_sent_frame.payload[0] == 1U);
 
     memset(&g_sent_frame, 0, sizeof(g_sent_frame));
     g_tick = 80U;
@@ -493,6 +499,8 @@ static void TestButtonHeldLowOnlyTriggersOnceUntilReleased(void)
     g_button_pin_state = GPIO_PIN_RESET;
     g_tick = 120U;
     AppSlave_Poll();
+    assert(g_sent_frame.msg_type == 0U);
+
     g_tick = 151U;
     AppSlave_Poll();
 
@@ -505,6 +513,10 @@ static void TestButtonLedPulseTurnsOffAfterDeadline(void)
     ResetFakes();
     g_send_frame_result = true;
     g_button_pin_state = GPIO_PIN_RESET;
+
+    AppSlave_Poll();
+    assert(g_led_pin_state == GPIO_PIN_RESET);
+
     g_tick = 31U;
     AppSlave_Poll();
     assert(g_led_pin_state == GPIO_PIN_SET);
