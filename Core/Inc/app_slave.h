@@ -9,7 +9,7 @@
 
 #include <string.h>
 
-#ifndef GPIO_PIN_SET
+#ifndef STM32F411xE
 typedef struct GPIO_TypeDef GPIO_TypeDef;
 typedef enum {
     GPIO_PIN_RESET = 0U,
