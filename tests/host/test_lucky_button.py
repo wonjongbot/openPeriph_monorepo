@@ -20,6 +20,12 @@ class LuckyButtonTests(unittest.TestCase):
 
         self.assertEqual(lines, ["hello", "snowman ?", "xxxxxxxxxx"])
 
+    def test_sanitize_lines_empty_fallback_respects_max_lines(self):
+        self.assertEqual(
+            lucky_button.sanitize_lines([], max_lines=1, max_width=10),
+            ["Lucky button"],
+        )
+
     def test_generate_mode_lines_supports_approved_modes_without_agent(self):
         event = {
             'slave_addr': 0x22,

@@ -22,6 +22,9 @@ MAX_LINES = 12
 
 def sanitize_lines(lines, max_lines=MAX_LINES, max_width=MAX_LINE_WIDTH):
     """Return printable ASCII display lines split to the requested width."""
+    if max_lines <= 0:
+        return []
+
     cleaned = []
 
     for line in lines:
@@ -35,7 +38,8 @@ def sanitize_lines(lines, max_lines=MAX_LINES, max_width=MAX_LINE_WIDTH):
         if len(cleaned) >= max_lines:
             return cleaned
 
-    return cleaned or ["Lucky button", "No content generated"]
+    fallback = ["Lucky button", "No content generated"]
+    return cleaned or fallback[:max_lines]
 
 
 def _repo_summary():
