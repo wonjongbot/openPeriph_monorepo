@@ -71,6 +71,60 @@ class LuckyButtonTests(unittest.TestCase):
         self.assertGreaterEqual(canvas.draw_multiline.call_count, 1)
         canvas.flush.assert_called_once_with(full_refresh=True)
 
+    def test_handle_packet_returns_false_when_canvas_clear_fails(self):
+        payload = bytes([0x22, 0x09, 0x01, 0x34, 0x12])
+        packet = {
+            'valid': True,
+            'type': send_data.PKT_TYPE_AGENT_EVENT,
+            'payload': payload,
+        }
+        canvas = MagicMock()
+        canvas.clear.return_value = False
+
+        handled = lucky_button.handle_packet(packet, canvas, mode='fortune', agent='none')
+
+        self.assertFalse(handled)
+        canvas.clear.assert_called_once()
+        canvas.draw_multiline.assert_not_called()
+        canvas.flush.assert_not_called()
+
+    def test_handle_packet_returns_false_when_canvas_draw_fails(self):
+        payload = bytes([0x22, 0x09, 0x01, 0x34, 0x12])
+        packet = {
+            'valid': True,
+            'type': send_data.PKT_TYPE_AGENT_EVENT,
+            'payload': payload,
+        }
+        canvas = MagicMock()
+        canvas.clear.return_value = True
+        canvas.draw_multiline.return_value = False
+
+        handled = lucky_button.handle_packet(packet, canvas, mode='fortune', agent='none')
+
+        self.assertFalse(handled)
+        canvas.clear.assert_called_once()
+        canvas.draw_multiline.assert_called_once()
+        canvas.flush.assert_not_called()
+
+    def test_handle_packet_returns_false_when_canvas_flush_fails(self):
+        payload = bytes([0x22, 0x09, 0x01, 0x34, 0x12])
+        packet = {
+            'valid': True,
+            'type': send_data.PKT_TYPE_AGENT_EVENT,
+            'payload': payload,
+        }
+        canvas = MagicMock()
+        canvas.clear.return_value = True
+        canvas.draw_multiline.return_value = True
+        canvas.flush.return_value = False
+
+        handled = lucky_button.handle_packet(packet, canvas, mode='fortune', agent='none')
+
+        self.assertFalse(handled)
+        canvas.clear.assert_called_once()
+        canvas.draw_multiline.assert_called_once()
+        canvas.flush.assert_called_once_with(full_refresh=True)
+
     def test_handle_packet_ignores_non_agent_event(self):
         packet = {
             'valid': True,
@@ -83,6 +137,14 @@ class LuckyButtonTests(unittest.TestCase):
 
         self.assertFalse(handled)
         canvas.clear.assert_not_called()
+
+    def test_repo_summary_reports_git_status_failure(self):
+        status = MagicMock(returncode=1, stdout='')
+
+        with patch('lucky_button.subprocess.run', return_value=status):
+            lines = lucky_button._repo_summary()
+
+        self.assertEqual(lines, ["Repo pulse", "git status failed"])
 
 
 if __name__ == '__main__':

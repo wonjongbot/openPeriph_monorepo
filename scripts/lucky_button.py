@@ -56,6 +56,9 @@ def _repo_summary():
     except (OSError, subprocess.TimeoutExpired):
         return ["Repo pulse", "git status unavailable"]
 
+    if status.returncode != 0:
+        return ["Repo pulse", "git status failed"]
+
     changed = [line for line in status.stdout.splitlines() if line.strip()]
     if not changed:
         return ["Repo pulse", "Working tree is clean"]
@@ -123,15 +126,17 @@ def resolve_mode(mode, event, agent='none'):
 
 
 def draw_lines(canvas, lines):
-    canvas.clear()
-    canvas.draw_multiline(
+    if not canvas.clear():
+        return False
+    if not canvas.draw_multiline(
         lines,
         x_start=5,
         y_start=5,
         font=16,
         clear_first_line=False,
-    )
-    canvas.flush(full_refresh=True)
+    ):
+        return False
+    return canvas.flush(full_refresh=True)
 
 
 def handle_packet(packet, canvas, mode='random', agent='none'):
@@ -141,8 +146,7 @@ def handle_packet(packet, canvas, mode='random', agent='none'):
     event = send_data.parse_agent_event_payload(packet.get('payload', b''))
     selected, lines = resolve_mode(mode, event, agent=agent)
     print(f"event {event['event_id']} from 0x{event['slave_addr']:02X}: {selected}")
-    draw_lines(canvas, lines)
-    return True
+    return draw_lines(canvas, lines)
 
 
 def run(port, dst, baud=115200, mode='random', agent='none'):
