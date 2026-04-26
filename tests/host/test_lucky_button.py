@@ -125,6 +125,24 @@ class LuckyButtonTests(unittest.TestCase):
         canvas.draw_multiline.assert_called_once()
         canvas.flush.assert_called_once_with(full_refresh=True)
 
+    def test_run_once_reads_from_canvas_serial(self):
+        packet = {
+            'valid': True,
+            'type': send_data.PKT_TYPE_AGENT_EVENT,
+            'payload': bytes([0x22, 0x01, 0x01, 0x00, 0x00]),
+        }
+        canvas = MagicMock()
+        canvas._ser = object()
+
+        with patch('lucky_button.EinkCanvas') as canvas_cls:
+            canvas_cls.return_value.__enter__.return_value = canvas
+            with patch('lucky_button.send_data.read_response', return_value=packet) as read_response:
+                lucky_button.run_once('/dev/fake', 0x22, mode='fortune', agent='none')
+
+        canvas_cls.assert_called_once_with(port='/dev/fake', dst=0x22, baud=115200)
+        read_response.assert_called_once_with(canvas._ser, timeout=1.0)
+        canvas.flush.assert_called_once_with(full_refresh=True)
+
     def test_handle_packet_ignores_non_agent_event(self):
         packet = {
             'valid': True,

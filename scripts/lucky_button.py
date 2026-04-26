@@ -7,7 +7,6 @@ import os
 import random
 import subprocess
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -149,23 +148,27 @@ def handle_packet(packet, canvas, mode='random', agent='none'):
     return draw_lines(canvas, lines)
 
 
+def run_once(port, dst, baud=115200, mode='random', agent='none'):
+    with EinkCanvas(port=port, dst=dst, baud=baud) as canvas:
+        packet = send_data.read_response(canvas._ser, timeout=1.0)
+        handle_packet(packet, canvas, mode=mode, agent=agent)
+
+
 def run(port, dst, baud=115200, mode='random', agent='none'):
     try:
-        import serial
+        import serial  # noqa: F401
     except ModuleNotFoundError:
         print("pyserial is required. Install with: pip install pyserial")
         return 1
 
-    with serial.Serial(port, baud, timeout=1) as ser:
-        time.sleep(0.5)
-        send_data.read_response(ser, timeout=0.2)
-        with EinkCanvas(port=port, dst=dst, baud=baud) as canvas:
-            while True:
-                packet = send_data.read_response(ser, timeout=1.0)
-                try:
-                    handle_packet(packet, canvas, mode=mode, agent=agent)
-                except ValueError as exc:
-                    print(f"ignored malformed agent event: {exc}")
+    with EinkCanvas(port=port, dst=dst, baud=baud) as canvas:
+        send_data.read_response(canvas._ser, timeout=0.2)
+        while True:
+            packet = send_data.read_response(canvas._ser, timeout=1.0)
+            try:
+                handle_packet(packet, canvas, mode=mode, agent=agent)
+            except ValueError as exc:
+                print(f"ignored malformed agent event: {exc}")
 
 
 def main():
