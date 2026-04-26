@@ -9,12 +9,46 @@
 
 #include <string.h>
 
+#ifndef GPIO_PIN_SET
+typedef struct GPIO_TypeDef GPIO_TypeDef;
+typedef enum {
+    GPIO_PIN_RESET = 0U,
+    GPIO_PIN_SET
+} GPIO_PinState;
+#define GPIO_PIN_11 ((uint16_t)0x0800U)
+#define GPIO_PIN_14 ((uint16_t)0x4000U)
+#define GPIOC ((GPIO_TypeDef *)0x40020800U)
+#endif
+
 extern void HAL_Delay(uint32_t delay);
 extern uint32_t HAL_GetTick(void);
+extern GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin);
+extern void HAL_GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState);
 
 /* If the slave receives nothing for this long, re-init the CC1101.
  * Cheap insurance against the radio silently leaving RX mode. */
 #define APP_SLAVE_RADIO_WATCHDOG_MS 2000U
+#define APP_SLAVE_BUTTON_DEBOUNCE_MS 30U
+#define APP_SLAVE_BUTTON_LED_PULSE_MS 100U
+#define APP_SLAVE_BUTTON_PRESS_SINGLE 1U
+
+typedef struct {
+    GPIO_PinState last_sample;
+    bool waiting_for_debounce;
+    bool armed;
+    uint32_t debounce_start_tick;
+    uint32_t led_until_tick;
+    uint8_t next_event_id;
+} AppSlaveButtonState_t;
+
+static AppSlaveButtonState_t g_app_slave_button_state = {
+    .last_sample = GPIO_PIN_SET,
+    .waiting_for_debounce = false,
+    .armed = true,
+    .debounce_start_tick = 0U,
+    .led_until_tick = 0U,
+    .next_event_id = 1U,
+};
 
 typedef struct {
     bool has_session;
@@ -34,6 +68,16 @@ static AppSlaveDrawState_t g_app_slave_draw_state;
 static inline void AppSlave_ClearDrawState(void)
 {
     memset(&g_app_slave_draw_state, 0, sizeof(g_app_slave_draw_state));
+}
+
+static inline void AppSlave_ResetButtonStateForTest(void)
+{
+    g_app_slave_button_state.last_sample = GPIO_PIN_SET;
+    g_app_slave_button_state.waiting_for_debounce = false;
+    g_app_slave_button_state.armed = true;
+    g_app_slave_button_state.debounce_start_tick = 0U;
+    g_app_slave_button_state.led_until_tick = 0U;
+    g_app_slave_button_state.next_event_id = 1U;
 }
 
 static inline void AppSlave_SendDrawAck(const RfFrame_t *frame, uint8_t phase, uint8_t value)
@@ -256,6 +300,72 @@ static inline void AppSlave_HandleDrawCommit(const RfFrame_t *frame)
     AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_COMMIT, 0U);
 }
 
+static inline void AppSlave_SendAgentTrigger(uint8_t event_id)
+{
+    RfFrame_t trigger = {0};
+    uint32_t tick = HAL_GetTick();
+
+    trigger.version = RF_FRAME_VERSION;
+    trigger.msg_type = RF_MSG_AGENT_TRIGGER;
+    trigger.dst_addr = OPENPERIPH_MASTER_ADDR;
+    trigger.src_addr = OPENPERIPH_NODE_ADDR;
+    trigger.seq = event_id;
+    trigger.payload_len = 4U;
+    trigger.payload[0] = event_id;
+    trigger.payload[1] = APP_SLAVE_BUTTON_PRESS_SINGLE;
+    trigger.payload[2] = (uint8_t)(tick & 0xFFU);
+    trigger.payload[3] = (uint8_t)((tick >> 8) & 0xFFU);
+
+    (void)RfLink_SendFrame(&trigger);
+}
+
+static inline void AppSlave_AcceptButtonPress(void)
+{
+    uint8_t event_id = g_app_slave_button_state.next_event_id;
+
+    g_app_slave_button_state.next_event_id = (uint8_t)(event_id + 1U);
+    if (g_app_slave_button_state.next_event_id == 0U) {
+        g_app_slave_button_state.next_event_id = 1U;
+    }
+    g_app_slave_button_state.armed = false;
+    g_app_slave_button_state.waiting_for_debounce = false;
+    g_app_slave_button_state.led_until_tick = HAL_GetTick() + APP_SLAVE_BUTTON_LED_PULSE_MS;
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_SET);
+    AppSlave_SendAgentTrigger(event_id);
+}
+
+static inline void AppSlave_PollButton(void)
+{
+    GPIO_PinState sample = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_11);
+    uint32_t now = HAL_GetTick();
+
+    if ((g_app_slave_button_state.led_until_tick != 0U) &&
+        ((int32_t)(now - g_app_slave_button_state.led_until_tick) >= 0)) {
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
+        g_app_slave_button_state.led_until_tick = 0U;
+    }
+
+    if (sample == GPIO_PIN_SET) {
+        g_app_slave_button_state.armed = true;
+        g_app_slave_button_state.waiting_for_debounce = false;
+        g_app_slave_button_state.debounce_start_tick = now;
+        g_app_slave_button_state.last_sample = sample;
+        return;
+    }
+
+    if ((sample == GPIO_PIN_RESET) && g_app_slave_button_state.armed) {
+        if (!g_app_slave_button_state.waiting_for_debounce ||
+            (g_app_slave_button_state.last_sample != sample)) {
+            g_app_slave_button_state.waiting_for_debounce = true;
+            g_app_slave_button_state.last_sample = sample;
+        }
+
+        if ((now - g_app_slave_button_state.debounce_start_tick) >= APP_SLAVE_BUTTON_DEBOUNCE_MS) {
+            AppSlave_AcceptButtonPress();
+        }
+    }
+}
+
 static inline void AppSlave_Init(void)
 {
     AppSlave_ClearDrawState();
@@ -266,6 +376,8 @@ static inline void AppSlave_Poll(void)
 {
     static uint32_t last_good_rx_tick = 0U;
     RfFrame_t frame;
+
+    AppSlave_PollButton();
 
     if (!RfLink_TryReceiveFrame(&frame)) {
         /* Radio watchdog: if nothing has been received for 2 seconds,

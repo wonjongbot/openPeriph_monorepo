@@ -29,6 +29,11 @@ static bool g_last_ack_valid;
 static RfDrawAck_t g_last_ack;
 static bool g_last_error_valid;
 static RfDrawError_t g_last_error;
+static uint32_t g_tick;
+static GPIO_PinState g_button_pin_state;
+static GPIO_PinState g_led_pin_state;
+static uint16_t g_last_gpio_write_pin;
+static uint8_t g_radio_init_calls;
 
 bool DisplayService_Init(void)
 {
@@ -172,6 +177,40 @@ bool RfLink_SendFrame(const RfFrame_t *frame)
     return g_send_frame_result;
 }
 
+uint32_t HAL_GetTick(void)
+{
+    return g_tick;
+}
+
+void HAL_Delay(uint32_t delay)
+{
+    g_tick += delay;
+}
+
+GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
+{
+    (void)GPIOx;
+    if (GPIO_Pin == GPIO_PIN_11) {
+        return g_button_pin_state;
+    }
+    return GPIO_PIN_SET;
+}
+
+void HAL_GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
+{
+    (void)GPIOx;
+    g_last_gpio_write_pin = GPIO_Pin;
+    if (GPIO_Pin == GPIO_PIN_14) {
+        g_led_pin_state = PinState;
+    }
+}
+
+bool Cc1101Radio_Init(void)
+{
+    ++g_radio_init_calls;
+    return true;
+}
+
 static void ResetFakes(void)
 {
     g_display_init_called = false;
@@ -198,6 +237,12 @@ static void ResetFakes(void)
     g_last_error_valid = false;
     memset(&g_last_error, 0, sizeof(g_last_error));
     AppSlave_ClearDrawState();
+    g_tick = 0U;
+    g_button_pin_state = GPIO_PIN_SET;
+    g_led_pin_state = GPIO_PIN_RESET;
+    g_last_gpio_write_pin = 0U;
+    g_radio_init_calls = 0U;
+    AppSlave_ResetButtonStateForTest();
 }
 
 static void PrimeFrame(uint8_t msg_type, uint8_t seq)
@@ -408,8 +453,76 @@ static void TestPingStillPongs(void)
     assert(g_sent_frame.seq == 0x5DU);
 }
 
+static void TestButtonPressDebouncesAndSendsAgentTrigger(void)
+{
+    ResetFakes();
+    g_send_frame_result = true;
+    g_button_pin_state = GPIO_PIN_RESET;
+
+    AppSlave_Poll();
+    assert(g_sent_frame.msg_type == 0U);
+
+    g_tick = 31U;
+    AppSlave_Poll();
+
+    assert(g_sent_frame.msg_type == RF_MSG_AGENT_TRIGGER);
+    assert(g_sent_frame.dst_addr == OPENPERIPH_MASTER_ADDR);
+    assert(g_sent_frame.src_addr == OPENPERIPH_NODE_ADDR);
+    assert(g_sent_frame.payload_len == 4U);
+    assert(g_sent_frame.payload[0] == 1U);
+    assert(g_sent_frame.payload[1] == 1U);
+    assert(g_led_pin_state == GPIO_PIN_SET);
+    assert(g_last_gpio_write_pin == GPIO_PIN_14);
+}
+
+static void TestButtonHeldLowOnlyTriggersOnceUntilReleased(void)
+{
+    ResetFakes();
+    g_send_frame_result = true;
+    g_button_pin_state = GPIO_PIN_RESET;
+    g_tick = 31U;
+    AppSlave_Poll();
+
+    memset(&g_sent_frame, 0, sizeof(g_sent_frame));
+    g_tick = 80U;
+    AppSlave_Poll();
+    assert(g_sent_frame.msg_type == 0U);
+
+    g_button_pin_state = GPIO_PIN_SET;
+    AppSlave_Poll();
+    g_button_pin_state = GPIO_PIN_RESET;
+    g_tick = 120U;
+    AppSlave_Poll();
+    g_tick = 151U;
+    AppSlave_Poll();
+
+    assert(g_sent_frame.msg_type == RF_MSG_AGENT_TRIGGER);
+    assert(g_sent_frame.payload[0] == 2U);
+}
+
+static void TestButtonLedPulseTurnsOffAfterDeadline(void)
+{
+    ResetFakes();
+    g_send_frame_result = true;
+    g_button_pin_state = GPIO_PIN_RESET;
+    g_tick = 31U;
+    AppSlave_Poll();
+    assert(g_led_pin_state == GPIO_PIN_SET);
+
+    g_tick = 130U;
+    AppSlave_Poll();
+    assert(g_led_pin_state == GPIO_PIN_SET);
+
+    g_tick = 132U;
+    AppSlave_Poll();
+    assert(g_led_pin_state == GPIO_PIN_RESET);
+}
+
 int main(void)
 {
+    TestButtonPressDebouncesAndSendsAgentTrigger();
+    TestButtonHeldLowOnlyTriggersOnceUntilReleased();
+    TestButtonLedPulseTurnsOffAfterDeadline();
     TestDrawBeginClearsAndAcks();
     TestDuplicateBeginIsReAcked();
     TestDrawTextAcceptsExpectedOpAndReAcksDuplicate();
