@@ -1,3 +1,5 @@
+#define OPENPERIPH_HOST_TEST
+
 #include "app_slave.h"
 
 #include <assert.h>

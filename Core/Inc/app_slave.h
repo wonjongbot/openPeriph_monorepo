@@ -9,7 +9,7 @@
 
 #include <string.h>
 
-#ifndef STM32F411xE
+#ifdef OPENPERIPH_HOST_TEST
 typedef struct GPIO_TypeDef GPIO_TypeDef;
 typedef enum {
     GPIO_PIN_RESET = 0U,
@@ -18,6 +18,8 @@ typedef enum {
 #define GPIO_PIN_11 ((uint16_t)0x0800U)
 #define GPIO_PIN_14 ((uint16_t)0x4000U)
 #define GPIOC ((GPIO_TypeDef *)0x40020800U)
+#else
+#include "main.h"
 #endif
 
 extern void HAL_Delay(uint32_t delay);
@@ -36,6 +38,7 @@ typedef struct {
     GPIO_PinState last_sample;
     bool waiting_for_debounce;
     bool armed;
+    bool led_active;
     uint32_t debounce_start_tick;
     uint32_t led_until_tick;
     uint8_t next_event_id;
@@ -45,6 +48,7 @@ static AppSlaveButtonState_t g_app_slave_button_state = {
     .last_sample = GPIO_PIN_SET,
     .waiting_for_debounce = false,
     .armed = true,
+    .led_active = false,
     .debounce_start_tick = 0U,
     .led_until_tick = 0U,
     .next_event_id = 1U,
@@ -70,15 +74,18 @@ static inline void AppSlave_ClearDrawState(void)
     memset(&g_app_slave_draw_state, 0, sizeof(g_app_slave_draw_state));
 }
 
+#ifdef OPENPERIPH_HOST_TEST
 static inline void AppSlave_ResetButtonStateForTest(void)
 {
     g_app_slave_button_state.last_sample = GPIO_PIN_SET;
     g_app_slave_button_state.waiting_for_debounce = false;
     g_app_slave_button_state.armed = true;
+    g_app_slave_button_state.led_active = false;
     g_app_slave_button_state.debounce_start_tick = 0U;
     g_app_slave_button_state.led_until_tick = 0U;
     g_app_slave_button_state.next_event_id = 1U;
 }
+#endif
 
 static inline void AppSlave_SendDrawAck(const RfFrame_t *frame, uint8_t phase, uint8_t value)
 {
@@ -329,6 +336,7 @@ static inline void AppSlave_AcceptButtonPress(void)
     }
     g_app_slave_button_state.armed = false;
     g_app_slave_button_state.waiting_for_debounce = false;
+    g_app_slave_button_state.led_active = true;
     g_app_slave_button_state.led_until_tick = HAL_GetTick() + APP_SLAVE_BUTTON_LED_PULSE_MS;
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_SET);
     AppSlave_SendAgentTrigger(event_id);
@@ -339,9 +347,10 @@ static inline void AppSlave_PollButton(void)
     GPIO_PinState sample = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_11);
     uint32_t now = HAL_GetTick();
 
-    if ((g_app_slave_button_state.led_until_tick != 0U) &&
+    if (g_app_slave_button_state.led_active &&
         ((int32_t)(now - g_app_slave_button_state.led_until_tick) >= 0)) {
         HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
+        g_app_slave_button_state.led_active = false;
         g_app_slave_button_state.led_until_tick = 0U;
     }
 
