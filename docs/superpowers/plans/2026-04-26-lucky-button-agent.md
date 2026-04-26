@@ -484,6 +484,16 @@ In `ResetCaptures()`, add:
     g_last_usb_packet_len = 0U;
 ```
 
+Add this radio fake near the existing `Cc1101Radio_RecoverRx()` fake if the
+test still does not provide it:
+
+```c
+bool Cc1101Radio_Init(void)
+{
+    return true;
+}
+```
+
 Add this helper after `ScriptDrawResponse()`:
 
 ```c
