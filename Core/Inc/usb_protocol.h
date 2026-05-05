@@ -54,6 +54,7 @@ typedef enum {
     PKT_TYPE_DRAW_BEGIN     = 0x12,  /* Begin staged draw session */
     PKT_TYPE_DRAW_COMMIT    = 0x13,  /* Commit staged draw session */
     PKT_TYPE_DISPLAY_FLUSH  = 0x14,  /* Flush committed staged framebuffer to EPD */
+    PKT_TYPE_DRAW_TILEMAP   = 0x15,  /* Packed tile-glyph image chunk payload */
 
     /* MCU -> PC */
     PKT_TYPE_ACK            = 0x80,  /* Acknowledge receipt */

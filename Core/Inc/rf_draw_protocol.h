@@ -11,6 +11,8 @@
 #define RF_DRAW_BEGIN_PAYLOAD_LEN 2U
 #define RF_DRAW_TEXT_FIXED_LEN 8U
 #define RF_DRAW_TEXT_MAX_LEN 24U
+#define RF_DRAW_TILEMAP_FIXED_LEN 4U
+#define RF_DRAW_TILEMAP_MAX_BYTES 44U
 #define RF_DRAW_COMMIT_PAYLOAD_LEN 1U
 #define RF_DRAW_ACK_PAYLOAD_LEN 2U
 #define RF_DRAW_ERROR_PAYLOAD_LEN 2U
@@ -18,8 +20,9 @@
 typedef enum {
     RF_DRAW_PHASE_BEGIN = 1U,
     RF_DRAW_PHASE_TEXT = 2U,
-    RF_DRAW_PHASE_COMMIT = 3U,
-    RF_DRAW_PHASE_FLUSH = 4U,
+    RF_DRAW_PHASE_TILEMAP = 3U,
+    RF_DRAW_PHASE_COMMIT = 4U,
+    RF_DRAW_PHASE_FLUSH = 5U,
 } RfDrawPhase_t;
 
 typedef enum {
@@ -46,6 +49,13 @@ typedef struct {
 
 typedef struct {
     uint8_t session_id;
+    uint16_t tile_offset;
+    uint8_t byte_count;
+    uint8_t packed_ids[RF_DRAW_TILEMAP_MAX_BYTES];
+} RfDrawTilemap_t;
+
+typedef struct {
+    uint8_t session_id;
 } RfDrawCommit_t;
 
 typedef struct {
@@ -62,6 +72,8 @@ size_t RfDrawProtocol_EncodeBegin(const RfDrawBegin_t *begin, uint8_t *out_buf, 
 bool RfDrawProtocol_DecodeBegin(const uint8_t *buf, size_t len, RfDrawBegin_t *out_begin);
 size_t RfDrawProtocol_EncodeText(const RfDrawText_t *text, uint8_t *out_buf, size_t out_capacity);
 bool RfDrawProtocol_DecodeText(const uint8_t *buf, size_t len, RfDrawText_t *out_text);
+size_t RfDrawProtocol_EncodeTilemap(const RfDrawTilemap_t *tilemap, uint8_t *out_buf, size_t out_capacity);
+bool RfDrawProtocol_DecodeTilemap(const uint8_t *buf, size_t len, RfDrawTilemap_t *out_tilemap);
 size_t RfDrawProtocol_EncodeCommit(const RfDrawCommit_t *commit, uint8_t *out_buf, size_t out_capacity);
 bool RfDrawProtocol_DecodeCommit(const uint8_t *buf, size_t len, RfDrawCommit_t *out_commit);
 size_t RfDrawProtocol_EncodeAck(const RfDrawAck_t *ack, uint8_t *out_buf, size_t out_capacity);

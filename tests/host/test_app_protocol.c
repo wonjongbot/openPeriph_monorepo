@@ -79,6 +79,24 @@ int main(void)
     assert(decoded_commit.dst_addr == 0x22U);
     assert(decoded_commit.session_id == 0x31U);
 
+    AppDrawTilemapCommand_t tilemap = {
+        .dst_addr = 0x22U,
+        .session_id = 0x31U,
+        .tile_offset = 42U,
+        .byte_count = 3U,
+        .packed_ids = { 0x12U, 0x34U, 0x56U },
+    };
+    AppDrawTilemapCommand_t decoded_tilemap;
+
+    used = AppProtocol_EncodeDrawTilemap(&tilemap, encoded, sizeof(encoded));
+    assert(used == 8U);
+    assert(AppProtocol_DecodeDrawTilemap(encoded, used, &decoded_tilemap));
+    assert(decoded_tilemap.dst_addr == 0x22U);
+    assert(decoded_tilemap.session_id == 0x31U);
+    assert(decoded_tilemap.tile_offset == 42U);
+    assert(decoded_tilemap.byte_count == 3U);
+    assert(memcmp(decoded_tilemap.packed_ids, tilemap.packed_ids, 3U) == 0);
+
     AppDisplayFlushCommand_t flush = {
         .dst_addr = 0x22U,
         .session_id = 0x31U,

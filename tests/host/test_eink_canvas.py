@@ -21,7 +21,7 @@ from eink_canvas import EinkCanvas
 
 
 def _make_canvas(chunk_size=24, send_begin_ok=True, send_text_ok=True,
-                 send_commit_ok=True, send_flush_ok=True):
+                 send_commit_ok=True, send_flush_ok=True, send_tilemap_ok=True):
     """Build an EinkCanvas with a mocked serial port and controllable stubs."""
     with patch('eink_canvas.send_data') as mock_sd, \
          patch('serial.Serial'):
@@ -32,10 +32,13 @@ def _make_canvas(chunk_size=24, send_begin_ok=True, send_text_ok=True,
         mock_sd.send_draw_text.return_value = send_text_ok
         mock_sd.send_draw_commit.return_value = send_commit_ok
         mock_sd.send_display_flush.return_value = send_flush_ok
+        mock_sd.send_draw_tilemap.return_value = send_tilemap_ok
         mock_sd.encode_draw_begin_payload.return_value = b'\x00'
         mock_sd.encode_draw_text_payload.return_value = b'\x00'
+        mock_sd.encode_draw_tilemap_payload.return_value = b'\x00'
         mock_sd.encode_draw_commit_payload.return_value = b'\x00'
         mock_sd.encode_flush_payload.return_value = b'\x00'
+        mock_sd.RF_DRAW_TILEMAP_MAX_BYTES = 44
 
         canvas = EinkCanvas.__new__(EinkCanvas)
         canvas.dst = 0x20
@@ -210,6 +213,39 @@ class TestFlushInPlaceRetry(unittest.TestCase):
         self.assertEqual(mock_sd.send_draw_commit.call_count, 2)
         # No session replay — begin never called again
         self.assertEqual(mock_sd.send_draw_begin.call_count, 0)
+
+
+class TestTilemapDrawing(unittest.TestCase):
+    @patch('eink_canvas.send_data')
+    @patch('serial.Serial')
+    def test_draw_tilemap_chunks_packed_payload(self, mock_serial, mock_sd):
+        mock_sd.RF_DRAW_TEXT_MAX_LEN = 24
+        mock_sd.RF_DRAW_TILEMAP_MAX_BYTES = 4
+        mock_sd.next_draw_session_id.return_value = 0x01
+        mock_sd.read_response.return_value = {}
+        mock_sd.send_draw_begin.return_value = True
+        mock_sd.send_draw_tilemap.return_value = True
+        mock_sd.encode_draw_begin_payload.return_value = b'\x00'
+        mock_sd.encode_draw_tilemap_payload.return_value = b'\x00'
+
+        canvas = EinkCanvas.__new__(EinkCanvas)
+        canvas.dst = 0x20
+        canvas.chunk_size = 24
+        canvas._ser = MagicMock()
+        canvas._port = '/dev/null'
+        canvas._baud = 115200
+        canvas._session_id = None
+        canvas._clear_first = False
+        canvas._ops = []
+        canvas._next_text_op_index = 0
+
+        with patch.object(eink_canvas, 'RF_INTER_OP_DELAY_S', 0):
+            result = canvas.draw_tilemap(b'\x01\x23\x45\x67\x89\xAB', clear_first=True)
+
+        self.assertTrue(result)
+        self.assertEqual(mock_sd.send_draw_begin.call_count, 1)
+        self.assertEqual(mock_sd.encode_draw_tilemap_payload.call_count, 2)
+        self.assertEqual(mock_sd.send_draw_tilemap.call_count, 2)
 
     @patch('eink_canvas.send_data')
     @patch('serial.Serial')

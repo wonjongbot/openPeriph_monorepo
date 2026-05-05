@@ -69,6 +69,7 @@ class EinkCanvas:
         self._session_id = None
         self._clear_first = False
         self._ops = []
+        self._next_text_op_index = 0
         self._open()
 
     def _open(self):
@@ -95,10 +96,12 @@ class EinkCanvas:
         self._session_id = None
         self._clear_first = False
         self._ops = []
+        self._next_text_op_index = 0
 
     def _begin_session(self, clear_first: bool) -> bool:
         self._session_id = send_data.next_draw_session_id()
         self._clear_first = clear_first
+        self._next_text_op_index = 0
         payload = send_data.encode_draw_begin_payload(self.dst, self._session_id, clear_first)
         if not self._send_with_retry(
             lambda: send_data.send_draw_begin(self._ser, payload),
@@ -144,8 +147,8 @@ class EinkCanvas:
         ok = True
         for chunk in chunks:
             op_x = x
-            op_index = len(self._ops)
-            self._ops.append((op_x, y, font, chunk))
+            op_index = self._next_text_op_index
+            self._ops.append(("text", op_x, y, font, chunk))
             payload = send_data.encode_draw_text_payload(
                 self.dst, self._session_id, op_index, op_x, y, str(font), chunk
             )
@@ -158,8 +161,37 @@ class EinkCanvas:
             ):
                 ok = False
                 break
+            self._next_text_op_index += 1
             x += len(chunk) * FONT_WIDTHS.get(font, 11)
         return ok
+
+    def draw_tilemap(self, packed_ids: bytes, clear_first: bool = False) -> bool:
+        """Stage a packed 4bpp tilemap inside the current draw session."""
+        if not packed_ids:
+            return True
+        if not self._ensure_session(clear_first=clear_first):
+            return False
+
+        tile_offset = 0
+        for i in range(0, len(packed_ids), send_data.RF_DRAW_TILEMAP_MAX_BYTES):
+            chunk = packed_ids[i:i + send_data.RF_DRAW_TILEMAP_MAX_BYTES]
+            payload = send_data.encode_draw_tilemap_payload(
+                self.dst, self._session_id, tile_offset, chunk
+            )
+            if i > 0:
+                time.sleep(RF_INTER_OP_DELAY_S)
+            if not self._send_with_retry(
+                lambda p=payload: send_data.send_draw_tilemap(self._ser, p),
+                label=f"DRAW_TILEMAP tile {tile_offset}",
+            ):
+                return False
+            self._ops.append(("tilemap", tile_offset, len(chunk)))
+            tile_offset += len(chunk) * 2
+        return True
+
+    def draw_image_file_as_tilemap(self, image_path: str, clear_first: bool = True) -> bool:
+        packed_ids = send_data.encode_image_file_as_tilemap(image_path)
+        return self.draw_tilemap(packed_ids, clear_first=clear_first)
 
     def draw_multiline(self, lines: list, x_start: int = 5, y_start: int = 5,
                        font: int = 16, line_spacing: int = None,

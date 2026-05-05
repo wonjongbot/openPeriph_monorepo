@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #define APP_TEXT_MAX_LEN 40U
+#define APP_DRAW_TILEMAP_MAX_BYTES 44U
 
 #define APP_CMD_DRAW_TEXT 0x20U
 
@@ -37,6 +38,14 @@ typedef struct {
 typedef struct {
     uint8_t dst_addr;
     uint8_t session_id;
+    uint16_t tile_offset;
+    uint8_t byte_count;
+    uint8_t packed_ids[APP_DRAW_TILEMAP_MAX_BYTES];
+} AppDrawTilemapCommand_t;
+
+typedef struct {
+    uint8_t dst_addr;
+    uint8_t session_id;
 } AppDrawCommitCommand_t;
 
 typedef struct {
@@ -59,6 +68,13 @@ size_t AppProtocol_EncodeDrawText(const AppDrawTextCommand_t *cmd,
 bool AppProtocol_DecodeDrawText(const uint8_t *buf,
                                 size_t len,
                                 AppDrawTextCommand_t *out_cmd);
+
+size_t AppProtocol_EncodeDrawTilemap(const AppDrawTilemapCommand_t *cmd,
+                                     uint8_t *out_buf,
+                                     size_t out_capacity);
+bool AppProtocol_DecodeDrawTilemap(const uint8_t *buf,
+                                   size_t len,
+                                   AppDrawTilemapCommand_t *out_cmd);
 
 size_t AppProtocol_EncodeDrawCommit(const AppDrawCommitCommand_t *cmd,
                                     uint8_t *out_buf,

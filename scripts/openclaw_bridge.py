@@ -24,6 +24,7 @@ Subcommands
 -----------
     bus        Show MTD bus departures (wraps bus_tracker.py)
     fortune    Show a random fortune sentence (uses lucky_button generator)
+    image      Show a local image file using the tile-glyph codec
     text       Show an arbitrary chat-supplied string
     weather    Show a weather card (wraps weather_widget.py)
     clock      Show the current time (wraps eink_clock.py)
@@ -34,6 +35,7 @@ Subcommands
 Examples (the kind of thing openClaw should run)
 ------------------------------------------------
     python scripts/openclaw_bridge.py fortune
+    python scripts/openclaw_bridge.py image path/to/photo.png
     python scripts/openclaw_bridge.py text "Meeting starts in 5 minutes"
     python scripts/openclaw_bridge.py bus --stop IU
     python scripts/openclaw_bridge.py weather --location "Urbana,IL"
@@ -58,7 +60,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 STM32_USB_VID = 0x0483
 STM32_USB_PID = 0x5740
 
-DEFAULT_DST = 0x22
+DEFAULT_DST = 0x20
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PYTHON_EXE = sys.executable or "python"
@@ -257,6 +259,26 @@ def cmd_text(args) -> int:
     return 0
 
 
+# ── Subcommand: image ───────────────────────────────────────────────────────
+
+def cmd_image(args) -> int:
+    from eink_canvas import EinkCanvas
+
+    if not os.path.exists(args.image_path):
+        print(f"ERROR: file not found: {args.image_path}")
+        return 1
+
+    with EinkCanvas(port=args.port, dst=args.dst) as canvas:
+        if not canvas.draw_image_file_as_tilemap(args.image_path, clear_first=True):
+            print("ERROR: draw_image_file_as_tilemap() failed")
+            return 1
+        if not canvas.flush(full_refresh=True):
+            print("ERROR: flush() failed")
+            return 1
+    print("OK: image pushed to slave display.")
+    return 0
+
+
 # ── Subcommand: fortune ─────────────────────────────────────────────────────
 
 def cmd_fortune(args) -> int:
@@ -381,6 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
     pt = sub.add_parser("text", help="Push arbitrary text from chat")
     pt.add_argument("text", help="The string to display (use quotes for multi-word)")
     pt.set_defaults(func=cmd_text)
+
+    # image
+    pi = sub.add_parser("image", help="Push a local image file via the tile-glyph codec")
+    pi.add_argument("image_path", help="Path to the image file to render")
+    pi.set_defaults(func=cmd_image)
 
     # fortune (a.k.a. "lucky")
     pf = sub.add_parser("fortune", help="Show a random fortune sentence (lucky-button modes)")

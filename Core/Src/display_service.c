@@ -1,6 +1,7 @@
 #include "display_service.h"
 
 #include "openperiph_config.h"
+#include "tile_glyphs.h"
 
 #include <string.h>
 
@@ -38,6 +39,23 @@ bool DisplayService_ClearBuffer(void)
 bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd)
 {
     (void)cmd;
+    return true;
+}
+
+bool DisplayService_DrawTileGlyph(uint16_t tile_index, uint8_t glyph_id)
+{
+    (void)tile_index;
+    (void)glyph_id;
+    return true;
+}
+
+bool DisplayService_DrawTilemapChunk(uint16_t tile_offset,
+                                     const uint8_t *packed_ids,
+                                     uint8_t byte_count)
+{
+    (void)tile_offset;
+    (void)packed_ids;
+    (void)byte_count;
     return true;
 }
 
@@ -261,6 +279,37 @@ static bool DisplayService_WriteTextToBuffer(uint16_t x,
     return true;
 }
 
+static bool DisplayService_DrawGlyphAtTile(uint16_t tile_index, uint8_t glyph_id)
+{
+    uint16_t tile_x;
+    uint16_t tile_y;
+    uint16_t px;
+    uint16_t py;
+
+    if (glyph_id >= TILE_GLYPH_COUNT || tile_index >= DISPLAY_TILE_TOTAL) {
+        return false;
+    }
+    if (!s_initialized && !DisplayService_Init()) {
+        return false;
+    }
+
+    tile_x = (uint16_t)(tile_index % DISPLAY_TILE_COLS);
+    tile_y = (uint16_t)(tile_index / DISPLAY_TILE_COLS);
+    px = (uint16_t)(tile_x * TILE_GLYPH_W);
+    py = (uint16_t)(tile_y * TILE_GLYPH_H);
+
+    Paint_SelectImage(DisplayService_MonoBuffer());
+    for (uint8_t row = 0U; row < TILE_GLYPH_H; ++row) {
+        const uint8_t bits = kTileGlyph8x8[glyph_id][row];
+        for (uint8_t col = 0U; col < TILE_GLYPH_W; ++col) {
+            const uint16_t color = ((bits & (uint8_t)(0x80U >> col)) != 0U) ? BLACK : WHITE;
+            Paint_SetPixel((UWORD)(px + col), (UWORD)(py + row), (UWORD)color);
+        }
+    }
+
+    return true;
+}
+
 bool DisplayService_RenderText(uint16_t x,
                                uint16_t y,
                                DisplayServiceFont_t font,
@@ -303,6 +352,42 @@ bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd)
 
     DisplayService_CopyCountedText(cmd, text, sizeof(text));
     return DisplayService_WriteTextToBuffer(cmd->x, cmd->y, font, text, false);
+}
+
+bool DisplayService_DrawTileGlyph(uint16_t tile_index, uint8_t glyph_id)
+{
+    return DisplayService_DrawGlyphAtTile(tile_index, glyph_id);
+}
+
+bool DisplayService_DrawTilemapChunk(uint16_t tile_offset,
+                                     const uint8_t *packed_ids,
+                                     uint8_t byte_count)
+{
+    uint16_t tile_index = tile_offset;
+
+    if ((packed_ids == NULL) || (byte_count == 0U) || (byte_count > APP_DRAW_TILEMAP_MAX_BYTES)) {
+        return false;
+    }
+    if (tile_offset >= DISPLAY_TILE_TOTAL) {
+        return false;
+    }
+    if (((uint32_t)tile_offset + ((uint32_t)byte_count * 2U)) > DISPLAY_TILE_TOTAL) {
+        return false;
+    }
+
+    for (uint8_t i = 0U; i < byte_count; ++i) {
+        const uint8_t packed = packed_ids[i];
+        const uint8_t glyph_a = (uint8_t)((packed >> 4) & 0x0FU);
+        const uint8_t glyph_b = (uint8_t)(packed & 0x0FU);
+
+        if (!DisplayService_DrawGlyphAtTile(tile_index, glyph_a) ||
+            !DisplayService_DrawGlyphAtTile((uint16_t)(tile_index + 1U), glyph_b)) {
+            return false;
+        }
+        tile_index = (uint16_t)(tile_index + 2U);
+    }
+
+    return true;
 }
 
 void DisplayService_Sleep(void)

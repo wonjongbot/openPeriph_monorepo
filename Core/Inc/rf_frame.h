@@ -20,6 +20,7 @@ typedef enum {
     RF_MSG_DRAW_BEGIN = 0x09,
     RF_MSG_DRAW_TEXT = 0x0A,
     RF_MSG_AGENT_TRIGGER = 0x0B,
+    RF_MSG_DRAW_TILEMAP = 0x0C,
     RF_MSG_ACK = 0x80,
     RF_MSG_ERROR = 0x81,
 } RfMessageType_t;

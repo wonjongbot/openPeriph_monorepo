@@ -215,6 +215,35 @@ static inline bool AppMaster_ExchangeDrawText(const AppDrawTextCommand_t *cmd,
     return AppMaster_ExchangeDrawFrame(&frame, RF_DRAW_PHASE_TEXT, cmd->op_index, out_nack_reason);
 }
 
+static inline bool AppMaster_ExchangeDrawTilemap(const AppDrawTilemapCommand_t *cmd,
+                                                 uint8_t seq,
+                                                 uint8_t *out_nack_reason)
+{
+    RfDrawTilemap_t tilemap = {0};
+    RfFrame_t frame = {0};
+
+    if ((cmd == NULL) || (cmd->byte_count == 0U) || (cmd->byte_count > RF_DRAW_TILEMAP_MAX_BYTES)) {
+        return false;
+    }
+
+    tilemap.session_id = cmd->session_id;
+    tilemap.tile_offset = cmd->tile_offset;
+    tilemap.byte_count = cmd->byte_count;
+    memcpy(tilemap.packed_ids, cmd->packed_ids, cmd->byte_count);
+
+    frame.version = RF_FRAME_VERSION;
+    frame.msg_type = RF_MSG_DRAW_TILEMAP;
+    frame.dst_addr = cmd->dst_addr;
+    frame.src_addr = OPENPERIPH_NODE_ADDR;
+    frame.seq = seq;
+    frame.payload_len = (uint8_t)RfDrawProtocol_EncodeTilemap(&tilemap, frame.payload, sizeof(frame.payload));
+    if (frame.payload_len != (uint8_t)(RF_DRAW_TILEMAP_FIXED_LEN + cmd->byte_count)) {
+        return false;
+    }
+
+    return AppMaster_ExchangeDrawFrame(&frame, RF_DRAW_PHASE_TILEMAP, 0U, out_nack_reason);
+}
+
 static inline bool AppMaster_ExchangeDrawCommit(const AppDrawCommitCommand_t *cmd,
                                                 uint8_t seq,
                                                 uint8_t *out_nack_reason)
@@ -310,6 +339,21 @@ static inline bool AppMaster_SendDrawCommit(const Packet_t *pkt, uint8_t *out_na
     }
 
     return AppMaster_ExchangeDrawCommit(&cmd, pkt->id, out_nack_reason);
+}
+
+static inline bool AppMaster_SendDrawTilemap(const Packet_t *pkt, uint8_t *out_nack_reason)
+{
+    AppDrawTilemapCommand_t cmd;
+
+    if (out_nack_reason != NULL) {
+        *out_nack_reason = 0x05U;
+    }
+
+    if ((pkt == NULL) || !AppProtocol_DecodeDrawTilemap(pkt->payload, pkt->payload_len, &cmd)) {
+        return false;
+    }
+
+    return AppMaster_ExchangeDrawTilemap(&cmd, pkt->id, out_nack_reason);
 }
 
 static inline bool AppMaster_HandleRfPingCommand(const Packet_t *pkt)
@@ -416,6 +460,18 @@ static inline void AppMaster_HandleUsbPacket(const Packet_t *pkt)
         uint8_t nack_reason = 0x05U;
 
         if (AppMaster_SendDrawText(pkt, &nack_reason)) {
+            OpenPeriph_SendUsbAck(pkt->id);
+        } else {
+            OpenPeriph_SendUsbNack(pkt->id, nack_reason);
+        }
+        break;
+    }
+
+    case PKT_TYPE_DRAW_TILEMAP:
+    {
+        uint8_t nack_reason = 0x05U;
+
+        if (AppMaster_SendDrawTilemap(pkt, &nack_reason)) {
             OpenPeriph_SendUsbAck(pkt->id);
         } else {
             OpenPeriph_SendUsbNack(pkt->id, nack_reason);

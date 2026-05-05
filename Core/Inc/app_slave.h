@@ -57,14 +57,20 @@ static AppSlaveButtonState_t g_app_slave_button_state = {
 typedef struct {
     bool has_session;
     bool accepting_text;
+    bool accepting_tilemap;
     bool committed;
     bool flushed;
     uint8_t session_id;
     uint8_t begin_flags;
     uint8_t next_op_index;
+    uint16_t next_tile_offset;
     uint8_t last_op_index;
     bool has_last_text;
     AppDrawTextCommand_t last_text;
+    bool has_last_tilemap;
+    uint16_t last_tile_offset;
+    uint8_t last_tile_byte_count;
+    uint8_t last_tile_packed_ids[RF_DRAW_TILEMAP_MAX_BYTES];
 } AppSlaveDrawState_t;
 
 static AppSlaveDrawState_t g_app_slave_draw_state;
@@ -138,6 +144,20 @@ static inline bool AppSlave_IsDuplicateText(const RfDrawText_t *text)
             (memcmp(g_app_slave_draw_state.last_text.text, text->text, text->text_len) == 0));
 }
 
+static inline bool AppSlave_IsDuplicateTilemap(const RfDrawTilemap_t *tilemap)
+{
+    if ((tilemap == NULL) || !g_app_slave_draw_state.has_last_tilemap) {
+        return false;
+    }
+
+    return (g_app_slave_draw_state.session_id == tilemap->session_id) &&
+           (g_app_slave_draw_state.last_tile_offset == tilemap->tile_offset) &&
+           (g_app_slave_draw_state.last_tile_byte_count == tilemap->byte_count) &&
+           (memcmp(g_app_slave_draw_state.last_tile_packed_ids,
+                   tilemap->packed_ids,
+                   tilemap->byte_count) == 0);
+}
+
 static inline void AppSlave_HandleDrawBegin(const RfFrame_t *frame)
 {
     RfDrawBegin_t begin;
@@ -182,6 +202,7 @@ static inline void AppSlave_HandleDrawBegin(const RfFrame_t *frame)
 
     g_app_slave_draw_state.has_session = true;
     g_app_slave_draw_state.accepting_text = true;
+    g_app_slave_draw_state.accepting_tilemap = true;
     g_app_slave_draw_state.session_id = begin.session_id;
     g_app_slave_draw_state.begin_flags = begin.flags;
     AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_BEGIN, 0U);
@@ -238,6 +259,46 @@ static inline void AppSlave_HandleDrawText(const RfFrame_t *frame)
     AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_TEXT, text.op_index);
 }
 
+static inline void AppSlave_HandleDrawTilemap(const RfFrame_t *frame)
+{
+    RfDrawTilemap_t tilemap;
+
+    if (!g_app_slave_draw_state.has_session ||
+        !g_app_slave_draw_state.accepting_tilemap ||
+        g_app_slave_draw_state.committed) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TILEMAP, RF_DRAW_ERROR_REASON_BAD_STATE);
+        return;
+    }
+    if (!RfDrawProtocol_DecodeTilemap(frame->payload, frame->payload_len, &tilemap)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TILEMAP, RF_DRAW_ERROR_REASON_LENGTH);
+        return;
+    }
+    if (tilemap.session_id != g_app_slave_draw_state.session_id) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TILEMAP, RF_DRAW_ERROR_REASON_BAD_STATE);
+        return;
+    }
+    if (AppSlave_IsDuplicateTilemap(&tilemap)) {
+        AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_TILEMAP, 0U);
+        return;
+    }
+    if (tilemap.tile_offset != g_app_slave_draw_state.next_tile_offset) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TILEMAP, RF_DRAW_ERROR_REASON_BAD_CHUNK);
+        return;
+    }
+    if (!DisplayService_DrawTilemapChunk(tilemap.tile_offset, tilemap.packed_ids, tilemap.byte_count)) {
+        AppSlave_SendDrawError(frame, RF_DRAW_PHASE_TILEMAP, RF_DRAW_ERROR_REASON_RENDER);
+        return;
+    }
+
+    g_app_slave_draw_state.has_last_tilemap = true;
+    g_app_slave_draw_state.last_tile_offset = tilemap.tile_offset;
+    g_app_slave_draw_state.last_tile_byte_count = tilemap.byte_count;
+    memcpy(g_app_slave_draw_state.last_tile_packed_ids, tilemap.packed_ids, tilemap.byte_count);
+    g_app_slave_draw_state.next_tile_offset =
+        (uint16_t)(tilemap.tile_offset + ((uint16_t)tilemap.byte_count * 2U));
+    AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_TILEMAP, 0U);
+}
+
 static inline void AppSlave_HandleDisplayFlush(const RfFrame_t *frame)
 {
     uint8_t session_id;
@@ -268,6 +329,7 @@ static inline void AppSlave_HandleDisplayFlush(const RfFrame_t *frame)
      * raises the probability that the master sees at least one. */
     g_app_slave_draw_state.flushed = true;
     g_app_slave_draw_state.accepting_text = false;
+    g_app_slave_draw_state.accepting_tilemap = false;
 
     for (uint8_t ack_burst = 0U; ack_burst < 3U; ++ack_burst) {
         AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_FLUSH, 0U);
@@ -304,6 +366,7 @@ static inline void AppSlave_HandleDrawCommit(const RfFrame_t *frame)
 
     g_app_slave_draw_state.committed = true;
     g_app_slave_draw_state.accepting_text = false;
+    g_app_slave_draw_state.accepting_tilemap = false;
     AppSlave_SendDrawAck(frame, RF_DRAW_PHASE_COMMIT, 0U);
 }
 
@@ -429,6 +492,10 @@ static inline void AppSlave_Poll(void)
 
     case RF_MSG_DRAW_TEXT:
         AppSlave_HandleDrawText(&frame);
+        break;
+
+    case RF_MSG_DRAW_TILEMAP:
+        AppSlave_HandleDrawTilemap(&frame);
         break;
 
     case RF_MSG_DRAW_COMMIT:

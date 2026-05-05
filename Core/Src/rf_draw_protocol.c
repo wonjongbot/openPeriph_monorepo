@@ -85,6 +85,49 @@ bool RfDrawProtocol_DecodeText(const uint8_t *buf, size_t len, RfDrawText_t *out
     return true;
 }
 
+size_t RfDrawProtocol_EncodeTilemap(const RfDrawTilemap_t *tilemap, uint8_t *out_buf, size_t out_capacity)
+{
+    size_t total_len;
+
+    if ((tilemap == NULL) || (out_buf == NULL)) {
+        return 0U;
+    }
+    if (tilemap->byte_count == 0U || tilemap->byte_count > RF_DRAW_TILEMAP_MAX_BYTES) {
+        return 0U;
+    }
+    total_len = RF_DRAW_TILEMAP_FIXED_LEN + (size_t)tilemap->byte_count;
+    if (out_capacity < total_len) {
+        return 0U;
+    }
+
+    out_buf[0] = tilemap->session_id;
+    RfDrawProtocol_WriteU16LE(&out_buf[1], tilemap->tile_offset);
+    out_buf[3] = tilemap->byte_count;
+    memcpy(&out_buf[RF_DRAW_TILEMAP_FIXED_LEN], tilemap->packed_ids, tilemap->byte_count);
+    return total_len;
+}
+
+bool RfDrawProtocol_DecodeTilemap(const uint8_t *buf, size_t len, RfDrawTilemap_t *out_tilemap)
+{
+    uint8_t byte_count;
+    size_t expected_len;
+
+    if ((buf == NULL) || (out_tilemap == NULL) || (len < RF_DRAW_TILEMAP_FIXED_LEN)) {
+        return false;
+    }
+    byte_count = buf[3];
+    expected_len = RF_DRAW_TILEMAP_FIXED_LEN + (size_t)byte_count;
+    if (byte_count == 0U || byte_count > RF_DRAW_TILEMAP_MAX_BYTES || len != expected_len) {
+        return false;
+    }
+
+    out_tilemap->session_id = buf[0];
+    out_tilemap->tile_offset = RfDrawProtocol_ReadU16LE(&buf[1]);
+    out_tilemap->byte_count = byte_count;
+    memcpy(out_tilemap->packed_ids, &buf[RF_DRAW_TILEMAP_FIXED_LEN], byte_count);
+    return true;
+}
+
 size_t RfDrawProtocol_EncodeCommit(const RfDrawCommit_t *commit, uint8_t *out_buf, size_t out_capacity)
 {
     if ((commit == NULL) || (out_buf == NULL) || (out_capacity < RF_DRAW_COMMIT_PAYLOAD_LEN)) {

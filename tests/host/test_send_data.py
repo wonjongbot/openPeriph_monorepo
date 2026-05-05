@@ -215,6 +215,14 @@ class SendDataTests(unittest.TestCase):
         self.assertEqual(send_data.encode_draw_commit_payload(0x22, 0x31), bytes([0x22, 0x31]))
         self.assertEqual(send_data.encode_flush_payload(0x22, 0x31, True), bytes([0x22, 0x31, 1]))
 
+    def test_encode_draw_tilemap_payload(self):
+        payload = send_data.encode_draw_tilemap_payload(0x22, 0x31, 10, b'\x12\x34')
+
+        self.assertEqual(payload, bytes([0x22, 0x31, 10, 0, 2, 0x12, 0x34]))
+
+    def test_pack_4bpp(self):
+        self.assertEqual(send_data.pack_4bpp([0x1, 0x2, 0xA, 0xF]), b'\x12\xAF')
+
     def test_rf_ping_rejects_out_of_range_destination(self):
         ser = FakeSerial(b'')
 

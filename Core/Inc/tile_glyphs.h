@@ -1,0 +1,18 @@
+#ifndef TILE_GLYPHS_H
+#define TILE_GLYPHS_H
+
+#include "openperiph_config.h"
+
+#include <stdint.h>
+
+#define TILE_GLYPH_COUNT 16U
+#define TILE_GLYPH_W 8U
+#define TILE_GLYPH_H 8U
+
+#define DISPLAY_TILE_COLS (OPENPERIPH_EPD_WIDTH_PX / TILE_GLYPH_W)
+#define DISPLAY_TILE_ROWS (OPENPERIPH_EPD_HEIGHT_PX / TILE_GLYPH_H)
+#define DISPLAY_TILE_TOTAL (DISPLAY_TILE_COLS * DISPLAY_TILE_ROWS)
+
+extern const uint8_t kTileGlyph8x8[TILE_GLYPH_COUNT][TILE_GLYPH_H];
+
+#endif /* TILE_GLYPHS_H */

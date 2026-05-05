@@ -24,12 +24,13 @@ You (openClaw) drive this entire chain by running a single Python script:
 
 You do **not** need to specify a serial port. The bridge auto-detects the
 STM32 CDC port by USB VID/PID (0x0483 / 0x5740). Slave RF address defaults to
-`0x20`. If something looks wrong, run `ports` first.
+`0x22`. If something looks wrong, run `ports` first.
 
 ## Subcommands
 
 | Subcommand | What shows up on the display | Example |
 |---|---|---|
+| `image path/to/file.png` | A stylized monochrome image via the tile-glyph codec | `python scripts/openclaw_bridge.py image ./photo.png` |
 | `text "<msg>"` | Arbitrary text from the user | `python scripts/openclaw_bridge.py text "Meeting starts in 5 minutes"` |
 | `fortune` | A short fortune sentence | `python scripts/openclaw_bridge.py fortune` |
 | `lucky` | One of weather/art/news/repo/fortune chosen at random | `python scripts/openclaw_bridge.py lucky` |
@@ -57,6 +58,7 @@ with each:
 - "What's the weather" / "show weather for <city>" → `weather --location <city>`
 - "Show the clock" / "what time is it on the display" → `clock`
 - "Show the rocket" / "draw the wave" → `art <name>`
+- "Show this photo" / "put this image on the eink" → `image <path>`
 - Anything else where the user clearly wants their own words on the screen
   ("display 'Lunch at 12:30'", "put 'Hi mom' on the eink") → `text "<the words>"`
 
@@ -73,7 +75,7 @@ The bridge prints status lines to stdout. After running it:
   stderr and pass that back to the user verbatim. Common cases:
   - `could not auto-detect the openPeriph host serial port` → ask the user
     to plug the host in via USB-C, then run `ports` to confirm.
-  - `RF ping slave 0x20: FAIL` → the slave is out of range or off; suggest
+  - `RF ping slave 0x22: FAIL` → the slave is out of range or off; suggest
     moving it closer or power-cycling it.
   - `provide --api-key or set MTD_API_KEY` (bus only) → the user needs to set
     their CUMTD API key.

@@ -32,6 +32,8 @@ static bool g_decode_begin_result;
 static AppDrawBeginCommand_t g_begin_cmd;
 static bool g_decode_text_result;
 static AppDrawTextCommand_t g_text_cmd;
+static bool g_decode_tilemap_result;
+static AppDrawTilemapCommand_t g_tilemap_cmd;
 static bool g_decode_commit_result;
 static AppDrawCommitCommand_t g_commit_cmd;
 static bool g_decode_flush_result;
@@ -122,6 +124,18 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf, size_t len, AppDrawTextComma
     return true;
 }
 
+bool AppProtocol_DecodeDrawTilemap(const uint8_t *buf, size_t len, AppDrawTilemapCommand_t *out_cmd)
+{
+    (void)buf;
+    (void)len;
+
+    if ((out_cmd == NULL) || !g_decode_tilemap_result) {
+        return false;
+    }
+    *out_cmd = g_tilemap_cmd;
+    return true;
+}
+
 bool AppProtocol_DecodeDrawCommit(const uint8_t *buf, size_t len, AppDrawCommitCommand_t *out_cmd)
 {
     (void)buf;
@@ -201,6 +215,26 @@ size_t RfDrawProtocol_EncodeCommit(const RfDrawCommit_t *commit, uint8_t *out_bu
 
     out_buf[0] = commit->session_id;
     return RF_DRAW_COMMIT_PAYLOAD_LEN;
+}
+
+size_t RfDrawProtocol_EncodeTilemap(const RfDrawTilemap_t *tilemap, uint8_t *out_buf, size_t out_capacity)
+{
+    size_t total_len;
+
+    if ((tilemap == NULL) || (out_buf == NULL) || (tilemap->byte_count == 0U)) {
+        return 0U;
+    }
+
+    total_len = RF_DRAW_TILEMAP_FIXED_LEN + (size_t)tilemap->byte_count;
+    if (out_capacity < total_len) {
+        return 0U;
+    }
+
+    out_buf[0] = tilemap->session_id;
+    WriteU16LE(&out_buf[1], tilemap->tile_offset);
+    out_buf[3] = tilemap->byte_count;
+    memcpy(&out_buf[RF_DRAW_TILEMAP_FIXED_LEN], tilemap->packed_ids, tilemap->byte_count);
+    return total_len;
 }
 
 bool RfDrawProtocol_DecodeAck(const uint8_t *buf, size_t len, RfDrawAck_t *out_ack)
@@ -298,6 +332,8 @@ static void ResetCaptures(void)
     memset(&g_begin_cmd, 0, sizeof(g_begin_cmd));
     g_decode_text_result = false;
     memset(&g_text_cmd, 0, sizeof(g_text_cmd));
+    g_decode_tilemap_result = false;
+    memset(&g_tilemap_cmd, 0, sizeof(g_tilemap_cmd));
     g_decode_commit_result = false;
     memset(&g_commit_cmd, 0, sizeof(g_commit_cmd));
     g_decode_flush_result = false;
@@ -492,6 +528,37 @@ static void TestDrawCommitAndFlushSuccess(void)
     assert(g_last_ack_id == flush_pkt.id);
 }
 
+static void TestDrawTilemapSuccess(void)
+{
+    Packet_t pkt = {
+        .type = PKT_TYPE_DRAW_TILEMAP,
+        .id = 0x47U,
+        .payload_len = 8U,
+    };
+
+    ResetCaptures();
+    g_decode_tilemap_result = true;
+    g_tilemap_cmd.dst_addr = 0x22U;
+    g_tilemap_cmd.session_id = 0x31U;
+    g_tilemap_cmd.tile_offset = 10U;
+    g_tilemap_cmd.byte_count = 3U;
+    g_tilemap_cmd.packed_ids[0] = 0x12U;
+    g_tilemap_cmd.packed_ids[1] = 0x34U;
+    g_tilemap_cmd.packed_ids[2] = 0x56U;
+    ScriptDrawAck(g_tilemap_cmd.dst_addr, pkt.id, RF_DRAW_PHASE_TILEMAP, 0U);
+
+    AppMaster_HandleUsbPacket(&pkt);
+
+    assert(g_send_frame_calls == 1U);
+    assert(g_sent_frames[0].msg_type == RF_MSG_DRAW_TILEMAP);
+    assert(g_sent_frames[0].payload_len == RF_DRAW_TILEMAP_FIXED_LEN + 3U);
+    assert(g_sent_frames[0].payload[0] == 0x31U);
+    assert(ReadU16LE(&g_sent_frames[0].payload[1]) == 10U);
+    assert(g_sent_frames[0].payload[3] == 3U);
+    assert(memcmp(&g_sent_frames[0].payload[RF_DRAW_TILEMAP_FIXED_LEN], g_tilemap_cmd.packed_ids, 3U) == 0);
+    assert(g_last_ack_id == pkt.id);
+}
+
 static void TestDrawTextRemoteErrorMapsToUsbNack(void)
 {
     Packet_t pkt = {
@@ -584,6 +651,7 @@ int main(void)
     TestDrawTextSuccess();
     TestDrawTextRetriesAfterMissedAck();
     TestDrawCommitAndFlushSuccess();
+    TestDrawTilemapSuccess();
     TestDrawTextRemoteErrorMapsToUsbNack();
     TestDrawTextTimeoutRecoversRadioAndNacks();
     TestMasterPollBridgesAgentTriggerToUsb();

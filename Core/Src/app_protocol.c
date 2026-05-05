@@ -4,6 +4,7 @@
 
 #define APP_DRAW_BEGIN_PAYLOAD_LEN 3U
 #define APP_DRAW_TEXT_FIXED_SIZE 9U
+#define APP_DRAW_TILEMAP_FIXED_SIZE 5U
 #define APP_DRAW_COMMIT_PAYLOAD_LEN 2U
 #define APP_DISPLAY_FLUSH_PAYLOAD_LEN 3U
 
@@ -99,6 +100,56 @@ bool AppProtocol_DecodeDrawText(const uint8_t *buf,
         memcpy(out_cmd->text, &buf[APP_DRAW_TEXT_FIXED_SIZE], text_len);
     }
 
+    return true;
+}
+
+size_t AppProtocol_EncodeDrawTilemap(const AppDrawTilemapCommand_t *cmd,
+                                     uint8_t *out_buf,
+                                     size_t out_capacity)
+{
+    size_t total_len;
+
+    if ((cmd == NULL) || (out_buf == NULL)) {
+        return 0U;
+    }
+    if (cmd->byte_count == 0U || cmd->byte_count > APP_DRAW_TILEMAP_MAX_BYTES) {
+        return 0U;
+    }
+    total_len = APP_DRAW_TILEMAP_FIXED_SIZE + (size_t)cmd->byte_count;
+    if (out_capacity < total_len) {
+        return 0U;
+    }
+
+    out_buf[0] = cmd->dst_addr;
+    out_buf[1] = cmd->session_id;
+    out_buf[2] = (uint8_t)(cmd->tile_offset & 0xFFU);
+    out_buf[3] = (uint8_t)(cmd->tile_offset >> 8);
+    out_buf[4] = cmd->byte_count;
+    memcpy(&out_buf[APP_DRAW_TILEMAP_FIXED_SIZE], cmd->packed_ids, cmd->byte_count);
+    return total_len;
+}
+
+bool AppProtocol_DecodeDrawTilemap(const uint8_t *buf,
+                                   size_t len,
+                                   AppDrawTilemapCommand_t *out_cmd)
+{
+    uint8_t byte_count;
+    size_t total_len;
+
+    if ((buf == NULL) || (out_cmd == NULL) || (len < APP_DRAW_TILEMAP_FIXED_SIZE)) {
+        return false;
+    }
+    byte_count = buf[4];
+    total_len = APP_DRAW_TILEMAP_FIXED_SIZE + (size_t)byte_count;
+    if (byte_count == 0U || byte_count > APP_DRAW_TILEMAP_MAX_BYTES || len != total_len) {
+        return false;
+    }
+
+    out_cmd->dst_addr = buf[0];
+    out_cmd->session_id = buf[1];
+    out_cmd->tile_offset = (uint16_t)buf[2] | ((uint16_t)buf[3] << 8);
+    out_cmd->byte_count = byte_count;
+    memcpy(out_cmd->packed_ids, &buf[APP_DRAW_TILEMAP_FIXED_SIZE], byte_count);
     return true;
 }
 

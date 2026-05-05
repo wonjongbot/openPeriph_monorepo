@@ -13,6 +13,8 @@ static bool g_display_clear_buffer_called;
 static bool g_display_clear_buffer_result;
 static bool g_draw_text_called;
 static bool g_draw_text_result;
+static bool g_draw_tilemap_called;
+static bool g_draw_tilemap_result;
 static bool g_display_flush_called;
 static bool g_display_flush_result;
 static bool g_try_receive_result;
@@ -25,6 +27,8 @@ static RfDrawBegin_t g_decoded_begin;
 static bool g_decode_begin_result;
 static RfDrawText_t g_decoded_text;
 static bool g_decode_text_result;
+static RfDrawTilemap_t g_decoded_tilemap;
+static bool g_decode_tilemap_result;
 static RfDrawCommit_t g_decoded_commit;
 static bool g_decode_commit_result;
 static bool g_last_ack_valid;
@@ -62,6 +66,23 @@ bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd)
     }
     g_draw_text_called = true;
     return g_draw_text_result;
+}
+
+bool DisplayService_DrawTileGlyph(uint16_t tile_index, uint8_t glyph_id)
+{
+    (void)tile_index;
+    (void)glyph_id;
+    return true;
+}
+
+bool DisplayService_DrawTilemapChunk(uint16_t tile_offset,
+                                     const uint8_t *packed_ids,
+                                     uint8_t byte_count)
+{
+    (void)tile_offset;
+    (void)packed_ids;
+    g_draw_tilemap_called = true;
+    return g_draw_tilemap_result && (byte_count > 0U);
 }
 
 bool DisplayService_RenderText(uint16_t x,
@@ -138,6 +159,18 @@ bool RfDrawProtocol_DecodeText(const uint8_t *buf, size_t len, RfDrawText_t *out
         return false;
     }
     *out_text = g_decoded_text;
+    return true;
+}
+
+bool RfDrawProtocol_DecodeTilemap(const uint8_t *buf, size_t len, RfDrawTilemap_t *out_tilemap)
+{
+    (void)buf;
+    (void)len;
+
+    if ((out_tilemap == NULL) || !g_decode_tilemap_result) {
+        return false;
+    }
+    *out_tilemap = g_decoded_tilemap;
     return true;
 }
 
@@ -220,6 +253,8 @@ static void ResetFakes(void)
     g_display_clear_buffer_result = true;
     g_draw_text_called = false;
     g_draw_text_result = true;
+    g_draw_tilemap_called = false;
+    g_draw_tilemap_result = true;
     g_display_flush_called = false;
     g_display_flush_result = true;
     g_try_receive_result = false;
@@ -230,9 +265,11 @@ static void ResetFakes(void)
     memset(&g_draw_text_cmd, 0, sizeof(g_draw_text_cmd));
     memset(&g_decoded_begin, 0, sizeof(g_decoded_begin));
     memset(&g_decoded_text, 0, sizeof(g_decoded_text));
+    memset(&g_decoded_tilemap, 0, sizeof(g_decoded_tilemap));
     memset(&g_decoded_commit, 0, sizeof(g_decoded_commit));
     g_decode_begin_result = false;
     g_decode_text_result = false;
+    g_decode_tilemap_result = false;
     g_decode_commit_result = false;
     g_last_ack_valid = false;
     memset(&g_last_ack, 0, sizeof(g_last_ack));
@@ -422,6 +459,39 @@ static void TestCommitAndFlushAreIdempotent(void)
     AssertAck(RF_DRAW_PHASE_FLUSH, 0U, 0x5AU);
 }
 
+static void TestDrawTilemapAcceptsExpectedOffsetAndReAcksDuplicate(void)
+{
+    ResetFakes();
+    PrimeFrame(RF_MSG_DRAW_BEGIN, 0x60U);
+    g_received_frame.payload_len = RF_DRAW_BEGIN_PAYLOAD_LEN;
+    g_decode_begin_result = true;
+    g_decoded_begin.session_id = 0x31U;
+    g_decoded_begin.flags = 0U;
+    AppSlave_Poll();
+
+    PrimeFrame(RF_MSG_DRAW_TILEMAP, 0x61U);
+    g_received_frame.payload_len = RF_DRAW_TILEMAP_FIXED_LEN + 3U;
+    g_decode_tilemap_result = true;
+    g_decoded_tilemap.session_id = 0x31U;
+    g_decoded_tilemap.tile_offset = 0U;
+    g_decoded_tilemap.byte_count = 3U;
+    g_decoded_tilemap.packed_ids[0] = 0x12U;
+    g_decoded_tilemap.packed_ids[1] = 0x34U;
+    g_decoded_tilemap.packed_ids[2] = 0x56U;
+    AppSlave_Poll();
+
+    assert(g_draw_tilemap_called);
+    AssertAck(RF_DRAW_PHASE_TILEMAP, 0U, 0x61U);
+
+    g_draw_tilemap_called = false;
+    PrimeFrame(RF_MSG_DRAW_TILEMAP, 0x62U);
+    g_received_frame.payload_len = RF_DRAW_TILEMAP_FIXED_LEN + 3U;
+    AppSlave_Poll();
+
+    assert(!g_draw_tilemap_called);
+    AssertAck(RF_DRAW_PHASE_TILEMAP, 0U, 0x62U);
+}
+
 static void TestFlushWithoutCommitErrors(void)
 {
     ResetFakes();
@@ -540,6 +610,7 @@ int main(void)
     TestDrawBeginClearsAndAcks();
     TestDuplicateBeginIsReAcked();
     TestDrawTextAcceptsExpectedOpAndReAcksDuplicate();
+    TestDrawTilemapAcceptsExpectedOffsetAndReAcksDuplicate();
     TestOutOfOrderTextErrors();
     TestCommitAndFlushAreIdempotent();
     TestFlushWithoutCommitErrors();

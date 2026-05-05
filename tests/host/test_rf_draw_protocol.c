@@ -72,6 +72,23 @@ int main(void)
     too_large_text.text_len = (uint8_t)(RF_DRAW_TEXT_MAX_LEN + 1U);
     assert(RfDrawProtocol_EncodeText(&too_large_text, buf, sizeof(buf)) == 0U);
 
+    RfDrawTilemap_t tilemap = {
+        .session_id = 0x31U,
+        .tile_offset = 120U,
+        .byte_count = 4U,
+        .packed_ids = { 0x12U, 0x34U, 0x56U, 0x78U },
+    };
+    RfDrawTilemap_t decoded_tilemap;
+
+    assert(RfDrawProtocol_EncodeTilemap(&tilemap, buf, RF_DRAW_TILEMAP_FIXED_LEN + 3U) == 0U);
+    used = RfDrawProtocol_EncodeTilemap(&tilemap, buf, sizeof(buf));
+    assert(used == RF_DRAW_TILEMAP_FIXED_LEN + 4U);
+    assert(RfDrawProtocol_DecodeTilemap(buf, used, &decoded_tilemap));
+    assert(decoded_tilemap.session_id == 0x31U);
+    assert(decoded_tilemap.tile_offset == 120U);
+    assert(decoded_tilemap.byte_count == 4U);
+    assert(memcmp(decoded_tilemap.packed_ids, tilemap.packed_ids, 4U) == 0);
+
     RfDrawCommit_t commit = {
         .session_id = 0x31U,
     };

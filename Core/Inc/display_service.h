@@ -28,6 +28,10 @@ bool DisplayService_Init(void);
 bool DisplayService_Clear(bool full_refresh);
 bool DisplayService_ClearBuffer(void);
 bool DisplayService_DrawText(const AppDrawTextCommand_t *cmd);
+bool DisplayService_DrawTileGlyph(uint16_t tile_index, uint8_t glyph_id);
+bool DisplayService_DrawTilemapChunk(uint16_t tile_offset,
+                                     const uint8_t *packed_ids,
+                                     uint8_t byte_count);
 bool DisplayService_RenderText(uint16_t x,
                                uint16_t y,
                                DisplayServiceFont_t font,

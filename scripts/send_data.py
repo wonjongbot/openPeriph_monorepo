@@ -33,6 +33,7 @@ PKT_TYPE_DRAW_TEXT      = 0x11
 PKT_TYPE_DRAW_BEGIN     = 0x12
 PKT_TYPE_DRAW_COMMIT    = 0x13
 PKT_TYPE_DISPLAY_FLUSH  = 0x14
+PKT_TYPE_DRAW_TILEMAP   = 0x15
 
 PKT_TYPE_ACK         = 0x80
 PKT_TYPE_NACK        = 0x81
@@ -51,6 +52,14 @@ APP_DRAW_FLAG_CLEAR_FIRST = 0x01
 
 APP_TEXT_MAX_LEN = 40
 RF_DRAW_TEXT_MAX_LEN = 24
+RF_DRAW_TILEMAP_MAX_BYTES = 44
+
+DISPLAY_WIDTH_PX = 648
+DISPLAY_HEIGHT_PX = 480
+TILE_SIZE_PX = 8
+DISPLAY_TILE_COLS = DISPLAY_WIDTH_PX // TILE_SIZE_PX
+DISPLAY_TILE_ROWS = DISPLAY_HEIGHT_PX // TILE_SIZE_PX
+DISPLAY_TILE_COUNT = DISPLAY_TILE_COLS * DISPLAY_TILE_ROWS
 
 PKT_MAX_PAYLOAD      = 1024
 _last_rf_ping_result = None
@@ -340,6 +349,10 @@ def send_draw_commit(ser, payload: bytes):
     frame = build_packet(PKT_TYPE_DRAW_COMMIT, payload)
     return send_and_wait_ack(ser, frame, "DRAW_COMMIT")
 
+def send_draw_tilemap(ser, payload: bytes):
+    frame = build_packet(PKT_TYPE_DRAW_TILEMAP, payload)
+    return send_and_wait_ack(ser, frame, "DRAW_TILEMAP")
+
 def encode_draw_begin_payload(dst: int, session_id: int, clear_first: bool) -> bytes:
     if not 0 <= dst <= 0xFF:
         raise ValueError("destination address must fit in 0..255")
@@ -354,6 +367,28 @@ def encode_draw_commit_payload(dst: int, session_id: int) -> bytes:
     if not 0 <= session_id <= 0xFF:
         raise ValueError("session id must fit in 0..255")
     return bytes([dst, session_id])
+
+def encode_draw_tilemap_payload(dst: int,
+                                session_id: int,
+                                tile_offset: int,
+                                packed_ids: bytes) -> bytes:
+    if not 0 <= dst <= 0xFF:
+        raise ValueError("destination address must fit in 0..255")
+    if not 0 <= session_id <= 0xFF:
+        raise ValueError("session id must fit in 0..255")
+    if not 0 <= tile_offset <= 0xFFFF:
+        raise ValueError("tile offset must fit in 0..65535")
+    if not packed_ids:
+        raise ValueError("packed tile payload must not be empty")
+    if len(packed_ids) > RF_DRAW_TILEMAP_MAX_BYTES:
+        raise ValueError(f"packed tile payload exceeds {RF_DRAW_TILEMAP_MAX_BYTES} bytes")
+
+    return (
+        bytes([dst, session_id])
+        + struct.pack('<H', tile_offset)
+        + bytes([len(packed_ids)])
+        + packed_ids
+    )
 
 def encode_flush_payload(dst: int, session_id: int, full_refresh: bool) -> bytes:
     if not 0 <= dst <= 0xFF:
@@ -424,6 +459,104 @@ def encode_draw_text_payload(dst: int,
         + text_bytes
     )
 
+def make_bayer_density_glyphs_16():
+    """Return the 16 ordered-dither 8x8 glyph bitmaps used by the firmware."""
+    bayer8 = [
+        [0, 48, 12, 60, 3, 51, 15, 63],
+        [32, 16, 44, 28, 35, 19, 47, 31],
+        [8, 56, 4, 52, 11, 59, 7, 55],
+        [40, 24, 36, 20, 43, 27, 39, 23],
+        [2, 50, 14, 62, 1, 49, 13, 61],
+        [34, 18, 46, 30, 33, 17, 45, 29],
+        [10, 58, 6, 54, 9, 57, 5, 53],
+        [42, 26, 38, 22, 41, 25, 37, 21],
+    ]
+    glyphs = []
+    for level in range(16):
+        threshold = 0 if level == 0 else (level * 64 + 14) // 15
+        glyph = []
+        for row in bayer8:
+            bits = 0
+            for idx, value in enumerate(row):
+                if value < threshold:
+                    bits |= 1 << (7 - idx)
+            glyph.append(bits)
+        glyphs.append(tuple(glyph))
+    return tuple(glyphs)
+
+TILE_GLYPHS_16 = make_bayer_density_glyphs_16()
+
+def _import_pillow():
+    try:
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("Pillow is required for tilemap image encoding: pip install pillow") from exc
+    return Image, ImageEnhance, ImageFilter, ImageOps
+
+def image_to_tile_ids(path: str) -> list[int]:
+    Image, ImageEnhance, ImageFilter, ImageOps = _import_pillow()
+
+    img = Image.open(path).convert('RGB')
+    resampling = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS')
+    img = ImageOps.fit(img, (DISPLAY_WIDTH_PX, DISPLAY_HEIGHT_PX), method=resampling)
+    gray = ImageOps.grayscale(img)
+    gray = ImageOps.autocontrast(gray, cutoff=2)
+    gray = ImageEnhance.Contrast(gray).enhance(1.55)
+    gray = gray.filter(ImageFilter.MedianFilter(5)).filter(ImageFilter.GaussianBlur(0.8))
+
+    ids = []
+    for ty in range(DISPLAY_TILE_ROWS):
+        for tx in range(DISPLAY_TILE_COLS):
+            tile = gray.crop((
+                tx * TILE_SIZE_PX,
+                ty * TILE_SIZE_PX,
+                (tx + 1) * TILE_SIZE_PX,
+                (ty + 1) * TILE_SIZE_PX,
+            ))
+            avg = sum(tile.getdata()) / float(TILE_SIZE_PX * TILE_SIZE_PX)
+            glyph_id = round((255.0 - avg) / 255.0 * 15.0)
+            ids.append(max(0, min(15, glyph_id)))
+    return ids
+
+def pack_4bpp(ids: list[int]) -> bytes:
+    out = bytearray()
+    for i in range(0, len(ids), 2):
+        a = ids[i] & 0x0F
+        b = ids[i + 1] & 0x0F if i + 1 < len(ids) else 0
+        out.append((a << 4) | b)
+    return bytes(out)
+
+def encode_image_file_as_tilemap(path: str) -> bytes:
+    ids = image_to_tile_ids(path)
+    if len(ids) != DISPLAY_TILE_COUNT:
+        raise ValueError(f"expected {DISPLAY_TILE_COUNT} tile ids, got {len(ids)}")
+    return pack_4bpp(ids)
+
+def send_draw_tilemap_session(ser,
+                              dst: int,
+                              image_path: str,
+                              *,
+                              clear_first: bool = True,
+                              full_refresh: bool = True) -> bool:
+    session_id = next_draw_session_id()
+    packed = encode_image_file_as_tilemap(image_path)
+    begin_payload = encode_draw_begin_payload(dst, session_id, clear_first)
+
+    if not send_draw_begin(ser, begin_payload):
+        return False
+
+    tile_offset = 0
+    for i in range(0, len(packed), RF_DRAW_TILEMAP_MAX_BYTES):
+        chunk = packed[i:i + RF_DRAW_TILEMAP_MAX_BYTES]
+        payload = encode_draw_tilemap_payload(dst, session_id, tile_offset, chunk)
+        if not send_draw_tilemap(ser, payload):
+            return False
+        tile_offset += len(chunk) * 2
+
+    commit_payload = encode_draw_commit_payload(dst, session_id)
+    flush_payload = encode_flush_payload(dst, session_id, full_refresh)
+    return send_draw_commit(ser, commit_payload) and send_display_flush(ser, flush_payload)
+
 def next_draw_session_id() -> int:
     global _draw_session_counter
 
@@ -467,6 +600,7 @@ def main():
                          help='Email data as "subject|body|recipient"')
     actions.add_argument('--text', help='Plain text message to send')
     actions.add_argument('--draw-text', help='Text to draw on slave EPD')
+    actions.add_argument('--draw-tilemap', help='Image file to draw as packed tile glyphs')
     actions.add_argument('--flush', action='store_true',
                          help='Flush staged framebuffer to EPD (requires --dst)')
     parser.add_argument('--session', type=lambda x: int(x, 0),
@@ -586,6 +720,28 @@ def main():
             if not ok:
                 sys.exit(1)
 
+        elif args.draw_tilemap is not None:
+            if args.dst is None:
+                print("--dst is required with --draw-tilemap")
+                sys.exit(1)
+            if not os.path.exists(args.draw_tilemap):
+                print(f"File not found: {args.draw_tilemap}")
+                sys.exit(1)
+
+            try:
+                ok = send_draw_tilemap_session(
+                    ser,
+                    args.dst,
+                    args.draw_tilemap,
+                    clear_first=True,
+                    full_refresh=True,
+                )
+            except (ValueError, RuntimeError) as exc:
+                print(f"Invalid draw-tilemap request: {exc}")
+                sys.exit(1)
+            if not ok:
+                sys.exit(1)
+
         elif args.flush:
             if args.dst is None or args.session is None:
                 print("--dst and --session are required with --flush")
@@ -598,7 +754,7 @@ def main():
             send_display_flush(ser, payload)
 
         else:
-            print("No action specified. Use --ping, --rf-ping, --rf-ping-bench, --image, --email, --text, --draw-text, or --flush")
+            print("No action specified. Use --ping, --rf-ping, --rf-ping-bench, --image, --email, --text, --draw-text, --draw-tilemap, or --flush")
 
     finally:
         ser.close()
