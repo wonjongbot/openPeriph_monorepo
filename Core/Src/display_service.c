@@ -118,26 +118,55 @@ static sFONT *DisplayService_SelectFont(DisplayServiceFont_t font)
     }
 }
 
+static uint16_t DisplayService_GetTextWidthPx(void)
+{
+#if OPENPERIPH_EPD_PANEL == OPENPERIPH_EPD_PANEL_2IN13_V4
+    return kPanelInfo.height_px;
+#else
+    return kPanelInfo.width_px;
+#endif
+}
+
+static uint16_t DisplayService_GetTextHeightPx(void)
+{
+#if OPENPERIPH_EPD_PANEL == OPENPERIPH_EPD_PANEL_2IN13_V4
+    return kPanelInfo.width_px;
+#else
+    return kPanelInfo.height_px;
+#endif
+}
+
+static UWORD DisplayService_GetTextRotate(void)
+{
+#if OPENPERIPH_EPD_PANEL == OPENPERIPH_EPD_PANEL_2IN13_V4
+    return ROTATE_270;
+#else
+    return ROTATE_0;
+#endif
+}
+
 static bool DisplayService_WillTextFit(uint16_t x,
                                        uint16_t y,
                                        const sFONT *font,
                                        size_t text_len)
 {
     size_t max_chars = 0U;
+    const uint16_t width_px = DisplayService_GetTextWidthPx();
+    const uint16_t height_px = DisplayService_GetTextHeightPx();
 
     if ((font == NULL) || (text_len == 0U)) {
         return false;
     }
 
-    if ((x >= kPanelInfo.width_px) || (y >= kPanelInfo.height_px)) {
+    if ((x >= width_px) || (y >= height_px)) {
         return false;
     }
 
-    if (((uint32_t)y + font->Height) > kPanelInfo.height_px) {
+    if (((uint32_t)y + font->Height) > height_px) {
         return false;
     }
 
-    max_chars = (kPanelInfo.width_px - x) / font->Width;
+    max_chars = (width_px - x) / font->Width;
     return (max_chars > 0U) && (text_len <= max_chars);
 }
 
@@ -220,7 +249,7 @@ bool DisplayService_Init(void)
     Paint_NewImage(DisplayService_MonoBuffer(),
                    kPanelInfo.width_px,
                    kPanelInfo.height_px,
-                   ROTATE_0,
+                   DisplayService_GetTextRotate(),
                    WHITE);
     Paint_SelectImage(DisplayService_MonoBuffer());
     Paint_Clear(WHITE);
@@ -270,6 +299,7 @@ static bool DisplayService_WriteTextToBuffer(uint16_t x,
     }
 
     Paint_SelectImage(DisplayService_MonoBuffer());
+    Paint_SetRotate(DisplayService_GetTextRotate());
     if (clear_first) {
         Paint_Clear(WHITE);
         DisplayService_ResetBuffersToWhite();
